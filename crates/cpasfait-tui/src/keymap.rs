@@ -66,8 +66,8 @@ const BINDINGS: &[(&str, Action)] = &[
     ("za", Action::ToggleFold),
     ("gt", Action::NextTab),
     ("gT", Action::PrevTab),
-    ("<c-pagedown>", Action::NextTab),
-    ("<c-pageup>", Action::PrevTab),
+    ("<a-right>", Action::NextTab),
+    ("<a-left>", Action::PrevTab),
     ("o", Action::AddBelow),
     ("O", Action::AddAbove),
     ("a", Action::AddChild),
@@ -99,17 +99,18 @@ const BINDINGS: &[(&str, Action)] = &[
 /// Encode a key event into the notation used in [`BINDINGS`].
 pub fn key_name(key: KeyEvent) -> Option<String> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     Some(match key.code {
         KeyCode::Char(c) if ctrl => format!("<c-{}>", c.to_ascii_lowercase()),
         KeyCode::Char(c) => c.to_string(),
         KeyCode::Down => "<down>".into(),
         KeyCode::Up => "<up>".into(),
+        KeyCode::Left if alt => "<a-left>".into(),
+        KeyCode::Right if alt => "<a-right>".into(),
         KeyCode::Left => "<left>".into(),
         KeyCode::Right => "<right>".into(),
         KeyCode::Tab => "<tab>".into(),
         KeyCode::Enter => "<enter>".into(),
-        KeyCode::PageDown if ctrl => "<c-pagedown>".into(),
-        KeyCode::PageUp if ctrl => "<c-pageup>".into(),
         KeyCode::PageDown => "<c-d>".into(),
         KeyCode::PageUp => "<c-u>".into(),
         _ => return None,
@@ -134,7 +135,7 @@ pub fn lookup(seq: &str) -> Lookup {
 pub const HELP: &str = "\
 Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page
               h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold
-              gt/gT    next/prev tab (also ^PgDn/^PgUp) 1-9    go to tab
+              gt/gT    next/prev tab (also Alt-→/Alt-←) 1-9    go to tab
               gn       jump to next (most prioritary) task
               gs       jump to the task being worked on
 Editing       o/O      new task below/above             a      new subtask

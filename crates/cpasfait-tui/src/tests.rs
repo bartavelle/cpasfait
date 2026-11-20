@@ -185,16 +185,16 @@ fn render_snapshot() {
 }
 
 #[test]
-fn ctrl_page_keys_switch_tabs() {
+fn alt_arrows_switch_tabs() {
     let (mut app, _) = app();
     press(&mut app, ":tabnew Work<enter>"); // tabs: inbox, Work; on Work
     let current = |app: &App| app.tabs[app.tab_idx].name.clone();
     assert_eq!(current(&app), "Work");
-    let ctrl = |app: &mut App, code| app.on_key(KeyEvent::new(code, KeyModifiers::CONTROL));
-    ctrl(&mut app, KeyCode::PageDown);
+    let alt = |app: &mut App, code| app.on_key(KeyEvent::new(code, KeyModifiers::ALT));
+    alt(&mut app, KeyCode::Right);
     assert_eq!(current(&app), "inbox"); // wraps around
-    ctrl(&mut app, KeyCode::PageUp);
+    alt(&mut app, KeyCode::Left);
     assert_eq!(current(&app), "Work");
-    ctrl(&mut app, KeyCode::PageUp);
+    alt(&mut app, KeyCode::Left);
     assert_eq!(current(&app), "inbox");
 }
