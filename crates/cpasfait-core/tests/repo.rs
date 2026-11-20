@@ -170,3 +170,60 @@ fn next_task_and_persistence() {
     assert_eq!(next.due, Some(jiff::civil::date(2026, 1, 1)));
     let _ = tab;
 }
+
+#[test]
+fn dependencies() {
+    let mut r = Repo::open_in_memory().unwrap();
+    let tab = r.create_tab("t").unwrap();
+    let other = r.create_tab("o").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
+    let child = r.add_task(tab, Place::LastChildOf(Some(a)), "child").unwrap();
+    let elsewhere = r.add_task(other, Place::LastChildOf(None), "x").unwrap();
+    r.set_priority(a, 5).unwrap();
+
+    r.set_blocked_by(a, b, true).unwrap();
+    assert_eq!(r.task(a).unwrap().blocked_by, vec![b]);
+    // a has an open child: still not actionable; the child is
+    assert_eq!(r.next_task(tab).unwrap().unwrap().id, child);
+    r.toggle_done(child).unwrap();
+    // a is blocked by b
+    assert_eq!(r.next_task(tab).unwrap().unwrap().id, b);
+    r.toggle_done(b).unwrap();
+    assert_eq!(r.next_task(tab).unwrap().unwrap().id, a);
+
+    assert!(r.set_blocked_by(a, a, true).is_err());
+    assert!(r.set_blocked_by(b, a, true).is_err(), "cycle");
+    assert!(r.set_blocked_by(child, a, true).is_err(), "requires its parent");
+    assert!(r.set_blocked_by(a, elsewhere, true).is_err(), "other tab");
+    r.set_blocked_by(a, b, false).unwrap();
+    assert!(r.task(a).unwrap().blocked_by.is_empty());
+    // removing is always allowed, even if never set
+    r.set_blocked_by(b, a, false).unwrap();
+    let before = r.dump_model().unwrap();
+    r.rebuild().unwrap();
+    assert_eq!(r.dump_model().unwrap(), before);
+}
+
+#[test]
+fn upgrade_from_v1_replays_dependency_ops() {
+    // A v1 client stored a "task.blocked_by" op it did not understand.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let (a, b) = {
+        let mut r = Repo::open(&path).unwrap();
+        let tab = r.create_tab("t").unwrap();
+        let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+        let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
+        r.set_blocked_by(a, b, true).unwrap();
+        (a, b)
+    };
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch("DROP TABLE task_dep; PRAGMA user_version = 1;")
+            .unwrap();
+    }
+    // The read-only open used by the companion tools migrates too.
+    let r = Repo::open_readonly(&path).unwrap();
+    assert_eq!(r.task(a).unwrap().blocked_by, vec![b]);
+}

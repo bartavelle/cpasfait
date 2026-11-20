@@ -222,9 +222,57 @@ impl Tree {
         out
     }
 
+    /// Tasks of this tree that `id` requires (unknown and hidden ones left out).
+    pub fn blockers(&self, id: TaskId) -> Vec<TaskId> {
+        self.get(id)
+            .map(|t| t.blocked_by.iter().copied().filter(|b| self.contains(*b)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Tasks of this tree that require `id`, in tree order.
+    pub fn blocking(&self, id: TaskId) -> Vec<TaskId> {
+        self.tasks
+            .iter()
+            .filter(|t| t.blocked_by.contains(&id))
+            .map(|t| t.id)
+            .collect()
+    }
+
+    /// Done, or under a done ancestor.
+    pub fn is_effectively_done(&self, id: TaskId) -> bool {
+        self.get(id).is_some_and(|t| t.is_done())
+            || self
+                .ancestors(id)
+                .iter()
+                .any(|a| self.get(*a).is_some_and(|t| t.is_done()))
+    }
+
+    /// Has a blocker that is not done yet.
+    pub fn is_blocked(&self, id: TaskId) -> bool {
+        self.blockers(id).iter().any(|b| !self.is_effectively_done(*b))
+    }
+
+    /// Does `from` require `to`, directly or through other requirements?
+    pub fn requires_transitively(&self, from: TaskId, to: TaskId) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![from];
+        while let Some(t) = stack.pop() {
+            if t == to {
+                return true;
+            }
+            if seen.insert(t)
+                && let Some(task) = self.get(t)
+            {
+                stack.extend(task.blocked_by.iter().copied());
+            }
+        }
+        false
+    }
+
     /// The most prioritary actionable task:
     /// - not done, with no done ancestor (done hides the subtree's remaining work);
     /// - a leaf with respect to open work (no child still to do);
+    /// - not blocked by a task still to do;
     /// - ordered by priority (highest first), then due date (earliest first,
     ///   none last), then tree order.
     pub fn next_task(&self) -> Option<TaskId> {
@@ -244,8 +292,14 @@ impl Tree {
             let t = &self.tasks[i];
             (std::cmp::Reverse(t.priority), t.due.is_none(), t.due, i)
         };
+        let blocked = |i: usize| {
+            self.tasks[i]
+                .blocked_by
+                .iter()
+                .any(|b| self.index.get(b).is_some_and(|&j| active[j]))
+        };
         (0..n)
-            .filter(|&i| active[i] && !open_child[i])
+            .filter(|&i| active[i] && !open_child[i] && !blocked(i))
             .min_by_key(|&i| key(i))
             .map(|i| self.tasks[i].id)
     }
@@ -294,6 +348,7 @@ mod tests {
             position: pos.into(),
             deleted: false,
             tags: vec![],
+            blocked_by: vec![],
         }
     }
 
@@ -353,5 +408,33 @@ mod tests {
         dp.status = Status::Done;
         let t = Tree::build(vec![dp, tc1, tc2, to]);
         assert_eq!(t.next_task(), Some(other));
+    }
+
+    #[test]
+    fn blocked_tasks_are_not_next() {
+        let (a, b, c) = (TaskId::new(), TaskId::new(), TaskId::new());
+        let mut ta = task(a, None, "1");
+        ta.priority = 9;
+        ta.blocked_by = vec![b, TaskId::new()]; // unknown blockers are ignored
+        let tb = task(b, None, "2");
+        let mut tc = task(c, None, "3");
+        tc.blocked_by = vec![a];
+        let t = Tree::build(vec![ta.clone(), tb.clone(), tc.clone()]);
+        assert!(t.is_blocked(a) && !t.is_blocked(b) && t.is_blocked(c));
+        assert_eq!(t.blockers(a), vec![b]);
+        assert_eq!(t.blocking(a), vec![c]);
+        assert_eq!(t.next_task(), Some(b));
+        assert!(t.requires_transitively(c, b) && !t.requires_transitively(b, c));
+        // blocker done -> unblocked
+        let mut tb_done = tb.clone();
+        tb_done.status = Status::Done;
+        let t = Tree::build(vec![ta.clone(), tb_done, tc.clone()]);
+        assert!(!t.is_blocked(a));
+        assert_eq!(t.next_task(), Some(a));
+        // a deleted blocker no longer blocks
+        let mut tb_del = tb;
+        tb_del.deleted = true;
+        let t = Tree::build(vec![ta, tb_del, tc]);
+        assert_eq!(t.next_task(), Some(a));
     }
 }

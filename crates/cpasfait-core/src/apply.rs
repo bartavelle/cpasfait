@@ -107,6 +107,20 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
                 )?;
             }
         }
+        TaskBlockedBy { task, on } => {
+            ensure_task()?;
+            if on {
+                conn.execute(
+                    "INSERT OR IGNORE INTO task_dep(task, blocker) VALUES (?1, ?2)",
+                    params![entity, task.to_string()],
+                )?;
+            } else {
+                conn.execute(
+                    "DELETE FROM task_dep WHERE task = ?1 AND blocker = ?2",
+                    params![entity, task.to_string()],
+                )?;
+            }
+        }
         SessionTask(t) => set!(ensure_session, "session", "task", t.to_string()),
         SessionDevice(d) => set!(ensure_session, "session", "device", d.to_string()),
         SessionUser(s) => set!(ensure_session, "session", "user", s),

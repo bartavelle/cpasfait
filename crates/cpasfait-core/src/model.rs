@@ -80,6 +80,9 @@ pub struct Task {
     pub position: String,
     pub deleted: bool,
     pub tags: Vec<String>,
+    /// Tasks that must be done before this one (may reference deleted or
+    /// unknown tasks: those are ignored).
+    pub blocked_by: Vec<TaskId>,
 }
 
 impl Task {

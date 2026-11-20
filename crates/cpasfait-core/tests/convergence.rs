@@ -37,6 +37,12 @@ enum Action {
         task: usize,
         on: bool,
     },
+    Require {
+        dev: usize,
+        task: usize,
+        blocker: usize,
+        on: bool,
+    },
     Work {
         dev: usize,
         task: usize,
@@ -63,6 +69,7 @@ fn action() -> impl Strategy<Value = Action> {
         2 => (dev.clone(), idx.clone(), idx.clone(), any::<bool>()).prop_map(|(dev, task, target, child)| Action::Move { dev, task, target, child }),
         1 => (dev.clone(), idx.clone()).prop_map(|(dev, task)| Action::Delete { dev, task }),
         1 => (dev.clone(), idx.clone(), any::<bool>()).prop_map(|(dev, task, on)| Action::Tag { dev, task, on }),
+        1 => (dev.clone(), idx.clone(), idx.clone(), any::<bool>()).prop_map(|(dev, task, blocker, on)| Action::Require { dev, task, blocker, on }),
         1 => (dev.clone(), idx.clone()).prop_map(|(dev, task)| Action::Work { dev, task }),
         1 => dev.clone().prop_map(|dev| Action::Stop { dev }),
         2 => (dev.clone(), dev.clone()).prop_map(|(from, to)| Action::Exchange { from, to }),
@@ -143,6 +150,13 @@ fn run(actions: Vec<Action>) -> Result<(), TestCaseError> {
             Action::Tag { dev, task, on } => {
                 if let Some(t) = pick(&repos[dev], tab, task) {
                     repos[dev].set_tag(t, "x", on).unwrap();
+                }
+            }
+            Action::Require { dev, task, blocker, on } => {
+                if let (Some(t), Some(b)) = (pick(&repos[dev], tab, task), pick(&repos[dev], tab, blocker)) {
+                    // Refusals (self, cycles, ancestors) are fine; concurrent
+                    // edits can still create cycles, which must merge too.
+                    let _ = repos[dev].set_blocked_by(t, b, on);
                 }
             }
             Action::Work { dev, task } => {

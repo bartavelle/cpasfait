@@ -47,6 +47,7 @@ are ordered after them.
 | `task.parent` | task id \| null | null/absent = root |
 | `task.position` | string | fractional index among siblings, see below |
 | `task.tag:<name>` | bool | tag present or not; one register per tag |
+| `task.blocked_by:<task id>` | bool | this task requires that one (same tab); one register per pair |
 | `task.deleted` | bool | tombstone; hides the subtree |
 | `session.task` | task id | work session → task |
 | `session.device` | device id | the device that runs the timer |
@@ -68,6 +69,15 @@ An entity exists as soon as any op targets it. Missing fields take their default
 - Parent cycles (two concurrent moves): the member of the cycle with the
   smallest id is treated as a root. This is deterministic, so every replica
   shows the same tree.
+
+### Dependency rules
+
+- A requirement on a task that is deleted or unknown locally is ignored.
+- A task is blocked while any of its requirements is not done (a task under
+  a done parent counts as done). Blocked tasks are never the "next task".
+- Clients refuse to create self-requirements, requirements on an ancestor,
+  and cycles, but concurrent edits can still produce a cycle: every task in it
+  is then blocked until someone removes a link. Nothing else breaks.
 
 ### Work log rules
 

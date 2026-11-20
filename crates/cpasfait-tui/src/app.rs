@@ -2,7 +2,7 @@
 
 use crate::editor::{EditResult, LineEditor};
 use crate::keymap::{self, Action, Lookup};
-use crate::search::Search;
+use crate::search::{Purpose, Search};
 use crate::timebox::TimePeriod;
 use anyhow::{Context, Result, anyhow, bail};
 use cpasfait_core::backend;
@@ -267,9 +267,10 @@ impl App {
                             EditResult::Cancel => self.mode = Mode::Normal,
                             EditResult::Submit => {
                                 let chosen = search.chosen().map(|c| (c.tab, c.id));
+                                let purpose = search.purpose;
                                 self.mode = Mode::Normal;
                                 if let Some((tab, id)) = chosen {
-                                    self.go_to_task(tab, id)?;
+                                    self.choose(purpose, tab, id)?;
                                 }
                             }
                         }
@@ -337,6 +338,41 @@ impl App {
                 }
             }
         }
+    }
+
+    fn open_search(&mut self, purpose: Purpose, query: &str) -> Result<()> {
+        let s = Search::new(&self.repo, self.tab_id().ok(), purpose, query)?;
+        if purpose != Purpose::Go && s.candidates.is_empty() {
+            match purpose {
+                Purpose::Unrequire(_) => bail!("this task has no requirement"),
+                Purpose::Unblock(_) => bail!("this task blocks nothing"),
+                _ => bail!("no other task in this tab"),
+            }
+        }
+        self.mode = Mode::Search(Box::new(s));
+        Ok(())
+    }
+
+    /// Act on a task chosen in the finder.
+    fn choose(&mut self, purpose: Purpose, tab: TabId, id: TaskId) -> Result<()> {
+        let title = |app: &App, t: TaskId| app.tree.get(t).map(|t| t.title.clone()).unwrap_or_default();
+        let (task, blocker, on) = match purpose {
+            Purpose::Go => return self.go_to_task(tab, id),
+            Purpose::Require(t) => (t, id, true),
+            Purpose::Block(t) => (id, t, true),
+            Purpose::Unrequire(t) => (t, id, false),
+            Purpose::Unblock(t) => (id, t, false),
+        };
+        self.repo.set_blocked_by(task, blocker, on)?;
+        let msg = format!(
+            "“{}” {} “{}”",
+            title(self, task),
+            if on { "now requires" } else { "no longer requires" },
+            title(self, blocker)
+        );
+        self.refresh()?;
+        self.info(msg);
+        Ok(())
     }
 
     /// Switch to `tab` if needed and select `id`, unfolding and un-hiding as needed.
@@ -620,7 +656,7 @@ impl App {
                 self.info(format!("time spent: {}", self.time_period.label()));
             }
             Command => self.mode = Mode::Command(LineEditor::default()),
-            Search => self.mode = Mode::Search(Box::new(crate::search::Search::new(&self.repo, self.tab_id().ok())?)),
+            Search => self.open_search(Purpose::Go, "")?,
             EditTags => match self.selected() {
                 Some(t) => self.start_tags(t),
                 None => self.info("no task selected"),
@@ -678,6 +714,16 @@ impl App {
                     }
                 }
                 self.refresh()?;
+            }
+            "require" | "requires" | "req" | "block" | "blocks" | "unrequire" | "unblock" => {
+                let t = need_task(self)?;
+                let purpose = match cmd {
+                    "block" | "blocks" => Purpose::Block(t),
+                    "unrequire" => Purpose::Unrequire(t),
+                    "unblock" => Purpose::Unblock(t),
+                    _ => Purpose::Require(t),
+                };
+                self.open_search(purpose, arg)?;
             }
             "prio" | "priority" => {
                 let t = need_task(self)?;

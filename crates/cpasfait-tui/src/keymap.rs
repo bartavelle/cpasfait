@@ -156,6 +156,7 @@ View          H        hide/show done tasks             D      toggle detail pan
               T        time spent box: hidden → today → this week → this month
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME
+              :require  :block  :unrequire  :unblock  (pick the other task)
               :tabnew NAME   :tabrename NAME   :tabclose!   :sync
               :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild   :q
               REMOTE = a directory, or gdrive:FOLDER-ID (see cpasfait-gdrive)

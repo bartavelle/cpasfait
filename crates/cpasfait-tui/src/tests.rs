@@ -327,3 +327,50 @@ fn ctrl_p_finds_tasks_across_tabs() {
     assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, "Prepare taxes");
     assert!(!app.hide_done);
 }
+
+#[test]
+fn require_and_block_commands() {
+    let (mut app, _) = app();
+    press(&mut app, "oBuy paint<enter>oPaint fence<enter>oInvite friends<enter>");
+    let id = |app: &App, title: &str| app.tree.iter().find(|t| t.title == title).unwrap().id;
+    let (paint, buy, invite) = (
+        id(&app, "Paint fence"),
+        id(&app, "Buy paint"),
+        id(&app, "Invite friends"),
+    );
+    let title = |app: &App| match &app.mode {
+        Mode::Search(s) => s.title.clone(),
+        _ => panic!("not searching"),
+    };
+
+    // Paint fence requires Buy paint (query given as argument).
+    press(&mut app, "ggj:require buy<enter>");
+    assert_eq!(title(&app), " “Paint fence” requires… ");
+    press(&mut app, "<enter>");
+    assert_eq!(app.repo.task(paint).unwrap().blocked_by, vec![buy]);
+    // Paint fence blocks Invite friends (picked in the finder).
+    press(&mut app, ":block<enter>inv<enter>");
+    assert_eq!(app.repo.task(invite).unwrap().blocked_by, vec![paint]);
+    assert_eq!(app.next, Some(buy));
+    app.detail_sessions.clear();
+    insta::assert_snapshot!("dependencies", screen(&mut app, 100, 14));
+
+    // Refused: cycle.
+    press(&mut app, "gg:require inv<enter><enter>");
+    assert!(app.message.as_ref().unwrap().error);
+    assert!(app.repo.task(buy).unwrap().blocked_by.is_empty());
+
+    // Unrequire only offers the current requirements.
+    press(&mut app, "j:unrequire<enter>");
+    match &app.mode {
+        Mode::Search(s) => assert_eq!(s.candidates.len(), 1),
+        _ => panic!(),
+    }
+    press(&mut app, "<enter>");
+    assert!(app.repo.task(paint).unwrap().blocked_by.is_empty());
+    press(&mut app, ":unrequire<enter>");
+    assert!(matches!(app.mode, Mode::Normal));
+    assert!(app.message.as_ref().unwrap().error);
+    press(&mut app, ":unblock<enter><enter>");
+    assert!(app.repo.task(invite).unwrap().blocked_by.is_empty());
+}

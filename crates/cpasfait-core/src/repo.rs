@@ -47,7 +47,19 @@ fn opt_id<T: std::str::FromStr>(s: Option<String>) -> rusqlite::Result<Option<T>
 }
 
 const TASK_COLS: &str = "t.id, t.tab, t.title, t.notes, t.status, t.priority, t.due, t.parent, t.position, t.deleted,
-    (SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM task_tag WHERE task = t.id ORDER BY tag))";
+    (SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM task_tag WHERE task = t.id ORDER BY tag)),
+    (SELECT group_concat(blocker, ' ') FROM task_dep WHERE task = t.id)";
+
+fn id_list(s: Option<String>) -> rusqlite::Result<Vec<TaskId>> {
+    let mut v: Vec<TaskId> = s
+        .as_deref()
+        .unwrap_or("")
+        .split_whitespace()
+        .map(parse_id)
+        .collect::<rusqlite::Result<_>>()?;
+    v.sort();
+    Ok(v)
+}
 
 fn task_from_row(r: &Row) -> rusqlite::Result<Task> {
     let status: String = r.get(4)?;
@@ -67,6 +79,7 @@ fn task_from_row(r: &Row) -> rusqlite::Result<Task> {
         tags: tags
             .map(|t| t.split('\u{1f}').map(str::to_owned).collect())
             .unwrap_or_default(),
+        blocked_by: id_list(r.get(11)?)?,
     })
 }
 
@@ -124,11 +137,21 @@ impl Repo {
         Self::init(Connection::open_in_memory()?)
     }
 
-    /// Open an existing database read-only, without migrations: fast path for tools.
+    /// Open an existing database read-only: fast path for tools. A database
+    /// with an older schema is first migrated (once) through a normal open.
     pub fn open_readonly(path: impl AsRef<Path>) -> Result<Repo> {
-        let conn =
+        let path = path.as_ref();
+        let mut conn =
             Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         conn.busy_timeout(Duration::from_secs(5))?;
+        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version < schema::SCHEMA_VERSION {
+            drop(conn);
+            drop(Self::open(path)?);
+            conn =
+                Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+            conn.busy_timeout(Duration::from_secs(5))?;
+        }
         let (device, user) = conn
             .query_row("SELECT id, user FROM device", [], |r| {
                 Ok((r.get::<_, String>(0)?, r.get(1)?))
@@ -146,7 +169,7 @@ impl Repo {
     fn init(mut conn: Connection) -> Result<Repo> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "foreign_keys", false)?;
-        schema::migrate(&mut conn)?;
+        let needs_rebuild = schema::migrate(&mut conn)?;
         let existing: Option<(String, String)> = conn
             .query_row("SELECT id, user FROM device", [], |r| Ok((r.get(0)?, r.get(1)?)))
             .optional()?;
@@ -162,12 +185,16 @@ impl Repo {
                 (id, user)
             }
         };
-        Ok(Repo {
+        let mut repo = Repo {
             conn,
             device,
             user,
             now: Box::new(system_now_ms),
-        })
+        };
+        if needs_rebuild {
+            repo.rebuild()?;
+        }
+        Ok(repo)
     }
 
     pub fn device(&self) -> DeviceId {
@@ -462,6 +489,30 @@ impl Repo {
         )
     }
 
+    /// Make `task` require `blocker` (or remove that requirement). Refuses
+    /// links across tabs, to itself, to its own ancestors (it could never
+    /// become actionable) and links that would close a cycle.
+    pub fn set_blocked_by(&mut self, task: TaskId, blocker: TaskId, on: bool) -> Result<()> {
+        if on {
+            let t = self.task(task)?;
+            let b = self.task(blocker)?;
+            if t.tab != b.tab {
+                return Err(Error::Invalid("dependencies must stay within a tab".into()));
+            }
+            if task == blocker {
+                return Err(Error::Invalid("a task cannot require itself".into()));
+            }
+            let tree = self.structure(t.tab)?;
+            if tree.ancestors(task).contains(&blocker) {
+                return Err(Error::Invalid("a task cannot require one of its parents".into()));
+            }
+            if tree.requires_transitively(blocker, task) {
+                return Err(Error::Invalid("that would create a dependency cycle".into()));
+            }
+        }
+        self.set_task(task, Change::TaskBlockedBy { task: blocker, on })
+    }
+
     pub fn delete_task(&mut self, task: TaskId) -> Result<()> {
         self.set_task(task, Change::TaskDeleted(true))
     }
@@ -666,9 +717,11 @@ impl Repo {
     /// The tree of a tab without titles, notes and tags (fast; for ranking and
     /// structure queries).
     pub fn structure(&self, tab: TabId) -> Result<Tree> {
-        let mut st = self
-            .conn
-            .prepare_cached("SELECT id, status, priority, due, parent, position, deleted FROM task WHERE tab = ?1")?;
+        let mut st = self.conn.prepare_cached(
+            "SELECT id, status, priority, due, parent, position, deleted,
+                    (SELECT group_concat(blocker, ' ') FROM task_dep WHERE task = t.id)
+                 FROM task t WHERE tab = ?1",
+        )?;
         let rows = st.query_map(params![tab.to_string()], |r| {
             let status: String = r.get(1)?;
             let due: Option<String> = r.get(3)?;
@@ -684,6 +737,7 @@ impl Repo {
                 position: r.get(5)?,
                 deleted: r.get(6)?,
                 tags: vec![],
+                blocked_by: id_list(r.get(7)?)?,
             })
         })?;
         Ok(Tree::build(rows.collect::<rusqlite::Result<_>>()?))
@@ -762,7 +816,7 @@ impl Repo {
         let ops = self.all_ops()?;
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(
-            "DELETE FROM field_hlc; DELETE FROM task; DELETE FROM task_tag; DELETE FROM session;
+            "DELETE FROM field_hlc; DELETE FROM task; DELETE FROM task_tag; DELETE FROM task_dep; DELETE FROM session;
              UPDATE tab SET name = '', deleted = 0;",
         )?;
         for op in &ops {
@@ -782,6 +836,7 @@ impl Repo {
                 10,
             ),
             ("SELECT task, tag FROM task_tag ORDER BY task, tag", 2),
+            ("SELECT task, blocker FROM task_dep ORDER BY task, blocker", 2),
             (
                 "SELECT id, tab, task, device, user, start, end, note, deleted FROM session ORDER BY id",
                 9,

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -91,15 +91,27 @@ CREATE TABLE remote_cursor(
 ) WITHOUT ROWID;
 "#;
 
-pub fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
+/// Task dependencies: `task` is blocked by (requires) `blocker`.
+const SCHEMA_V2: &str = r#"
+CREATE TABLE task_dep(task TEXT NOT NULL, blocker TEXT NOT NULL, PRIMARY KEY(task, blocker)) WITHOUT ROWID;
+CREATE INDEX task_dep_blocker ON task_dep(blocker);
+"#;
+
+/// Bring the schema up to date. Returns true when the read model must be
+/// rebuilt from the op log (a new table may interpret ops already received).
+pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     if version >= SCHEMA_VERSION {
-        return Ok(());
+        return Ok(false);
     }
     let tx = conn.transaction()?;
     if version < 1 {
         tx.execute_batch(SCHEMA_V1)?;
     }
+    if version < 2 {
+        tx.execute_batch(SCHEMA_V2)?;
+    }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    tx.commit()
+    tx.commit()?;
+    Ok(version >= 1)
 }

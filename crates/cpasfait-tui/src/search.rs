@@ -24,8 +24,26 @@ pub struct Hit {
     pub positions: Vec<usize>,
 }
 
+/// What choosing a task does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    /// Jump to it (all tabs).
+    Go,
+    /// The task requires the chosen one.
+    Require(TaskId),
+    /// The task blocks the chosen one.
+    Block(TaskId),
+    /// Remove one of the task's requirements.
+    Unrequire(TaskId),
+    /// Remove one of the tasks the task blocks.
+    Unblock(TaskId),
+}
+
 #[derive(Clone, Debug)]
 pub struct Search {
+    pub purpose: Purpose,
+    /// Dialog title.
+    pub title: String,
     pub editor: LineEditor,
     pub candidates: Vec<Candidate>,
     pub hits: Vec<Hit>,
@@ -35,14 +53,49 @@ pub struct Search {
 }
 
 impl Search {
-    /// All visible (non-deleted) tasks of all tabs, current tab first, in tree order.
-    pub fn new(repo: &Repo, current_tab: Option<TabId>) -> anyhow::Result<Self> {
+    /// For [`Purpose::Go`]: all visible tasks of all tabs, current tab first,
+    /// in tree order. Dependencies stay within the current tab.
+    pub fn new(repo: &Repo, current_tab: Option<TabId>, purpose: Purpose, query: &str) -> anyhow::Result<Self> {
         let mut tabs = repo.tabs()?;
         tabs.sort_by_key(|t| Some(t.id) != current_tab);
+        if purpose != Purpose::Go {
+            tabs.retain(|t| Some(t.id) == current_tab);
+        }
         let mut candidates = vec![];
+        let mut title = " find task ".to_owned();
         for tab in tabs {
             let tree = repo.tree(tab.id)?;
+            let name = |id| {
+                let t: &str = tree.get(id).map(|t| t.title.as_str()).unwrap_or("?");
+                let mut s: String = t.chars().take(30).collect();
+                if t.chars().count() > 30 {
+                    s.push('…');
+                }
+                s
+            };
+            let keep: Option<Vec<TaskId>> = match purpose {
+                Purpose::Go => None,
+                Purpose::Require(id) => {
+                    title = format!(" “{}” requires… ", name(id));
+                    Some(tree.iter().map(|t| t.id).filter(|&t| t != id).collect())
+                }
+                Purpose::Block(id) => {
+                    title = format!(" “{}” blocks… ", name(id));
+                    Some(tree.iter().map(|t| t.id).filter(|&t| t != id).collect())
+                }
+                Purpose::Unrequire(id) => {
+                    title = format!(" “{}” no longer requires… ", name(id));
+                    Some(tree.blockers(id))
+                }
+                Purpose::Unblock(id) => {
+                    title = format!(" “{}” no longer blocks… ", name(id));
+                    Some(tree.blocking(id))
+                }
+            };
             for t in tree.iter() {
+                if keep.as_ref().is_some_and(|k| !k.contains(&t.id)) {
+                    continue;
+                }
                 let mut path = tree.path(t.id);
                 path.pop();
                 candidates.push(Candidate {
@@ -56,7 +109,9 @@ impl Search {
             }
         }
         let mut s = Self {
-            editor: LineEditor::default(),
+            purpose,
+            title,
+            editor: LineEditor::new(query),
             candidates,
             hits: vec![],
             selected: 0,
@@ -122,7 +177,7 @@ mod tests {
         let path = std::env::var("CPASFAIT_BENCH_DB").expect("CPASFAIT_BENCH_DB");
         let repo = cpasfait_core::Repo::open_readonly(std::path::Path::new(&path)).unwrap();
         let t = std::time::Instant::now();
-        let mut s = super::Search::new(&repo, None).unwrap();
+        let mut s = super::Search::new(&repo, None, super::Purpose::Go, "").unwrap();
         println!("{} candidates loaded in {:?}", s.candidates.len(), t.elapsed());
         for q in ["a", "ta", "tas", "task 12", "zzzz"] {
             s.editor = crate::editor::LineEditor::new(q);

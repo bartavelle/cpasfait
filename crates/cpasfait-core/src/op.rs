@@ -63,6 +63,11 @@ pub enum Change {
         on: bool,
     },
     TaskDeleted(bool),
+    /// `task` must be done before this one ("blocked by" / "requires").
+    TaskBlockedBy {
+        task: TaskId,
+        on: bool,
+    },
 
     SessionTask(TaskId),
     SessionDevice(crate::ids::DeviceId),
@@ -83,6 +88,7 @@ pub enum EntityKind {
 }
 
 const TAG_PREFIX: &str = "task.tag:";
+const BLOCKED_BY_PREFIX: &str = "task.blocked_by:";
 
 impl Change {
     pub fn kind(&self) -> EntityKind {
@@ -97,6 +103,7 @@ impl Change {
             | TaskParent(_)
             | TaskPosition(_)
             | TaskTag { .. }
+            | TaskBlockedBy { .. }
             | TaskDeleted(_) => EntityKind::Task,
             SessionTask(_) | SessionDevice(_) | SessionUser(_) | SessionStart(_) | SessionEnd(_) | SessionNote(_)
             | SessionDeleted(_) => EntityKind::Session,
@@ -117,6 +124,7 @@ impl Change {
             TaskParent(_) => "task.parent".into(),
             TaskPosition(_) => "task.position".into(),
             TaskTag { tag, .. } => format!("{TAG_PREFIX}{tag}"),
+            TaskBlockedBy { task, .. } => format!("{BLOCKED_BY_PREFIX}{task}"),
             TaskDeleted(_) => "task.deleted".into(),
             SessionTask(_) => "session.task".into(),
             SessionDevice(_) => "session.device".into(),
@@ -133,7 +141,7 @@ impl Change {
         match self {
             TabName(s) | TaskTitle(s) | TaskNotes(s) | TaskPosition(s) | SessionUser(s) | SessionNote(s) => json!(s),
             TabDeleted(b) | TaskDeleted(b) | SessionDeleted(b) => json!(b),
-            TaskTag { on, .. } => json!(on),
+            TaskTag { on, .. } | TaskBlockedBy { on, .. } => json!(on),
             TaskStatus(s) => json!(s.as_str()),
             TaskPriority(p) => json!(p),
             TaskDue(d) => match d {
@@ -164,6 +172,12 @@ impl Change {
         if let Some(tag) = field.strip_prefix(TAG_PREFIX) {
             return Some(TaskTag {
                 tag: tag.to_owned(),
+                on: b()?,
+            });
+        }
+        if let Some(task) = field.strip_prefix(BLOCKED_BY_PREFIX) {
+            return Some(TaskBlockedBy {
+                task: task.parse().ok()?,
                 on: b()?,
             });
         }
@@ -228,6 +242,10 @@ mod tests {
             },
             Change::TaskDue(Some(jiff::civil::date(2026, 12, 1))),
             Change::TaskDue(None),
+            Change::TaskBlockedBy {
+                task: TaskId::new(),
+                on: false,
+            },
             Change::TaskParent(Some(TaskId::new())),
             Change::TaskParent(None),
             Change::TaskStatus(Status::Done),

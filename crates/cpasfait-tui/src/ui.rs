@@ -6,7 +6,7 @@ use crate::search::Search;
 use crate::timebox::{self, TimePeriod};
 use cpasfait_core::dates::today_local;
 use cpasfait_core::report::fmt_duration;
-use cpasfait_core::{Session, Task};
+use cpasfait_core::{Session, Task, TaskId};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -82,6 +82,9 @@ fn due_style(due: jiff::civil::Date) -> Style {
 /// Spans shown after the title: priority, due, tags, who is working on it.
 fn task_suffix<'a>(app: &App, t: &'a Task) -> Vec<Span<'a>> {
     let mut v = vec![];
+    if !t.is_done() && app.tree.is_blocked(t.id) {
+        v.push(Span::styled("  ⊘blocked", Style::new().fg(Color::Red)));
+    }
     if let Some(d) = t.due {
         v.push(Span::styled(format!("  ⌛{d}"), due_style(d)));
     }
@@ -248,6 +251,48 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
+    let dep_line = |id: TaskId| {
+        let Some(d) = app.tree.get(id) else {
+            return Line::raw("");
+        };
+        let done = app.tree.is_effectively_done(id);
+        let (mark, st) = if done {
+            ("✓ ", Style::new().fg(Color::Green))
+        } else {
+            ("○ ", Style::new())
+        };
+        let title = if d.title.is_empty() {
+            "(untitled)".to_owned()
+        } else {
+            d.title.clone()
+        };
+        Line::from(vec![
+            Span::raw("         "),
+            Span::styled(mark, st),
+            Span::styled(title, if done { Style::new().dim() } else { Style::new() }),
+        ])
+    };
+    for (name, ids) in [
+        ("requires", app.tree.blockers(t.id)),
+        ("blocks", app.tree.blocking(t.id)),
+    ] {
+        if ids.is_empty() {
+            continue;
+        }
+        let mut first = dep_line(ids[0]);
+        first.spans[0] = label(name);
+        if name == "requires" && !t.is_done() {
+            let open = ids.iter().filter(|b| !app.tree.is_effectively_done(**b)).count();
+            if open > 0 {
+                first.spans.push(Span::styled(
+                    format!("   ⊘ {open} to do first"),
+                    Style::new().fg(Color::Red),
+                ));
+            }
+        }
+        lines.push(first);
+        lines.extend(ids[1..].iter().map(|&id| dep_line(id)));
+    }
     if app.next == Some(t.id) {
         lines.push(Line::from(Span::styled(
             "★ next task in this tab",
@@ -364,7 +409,7 @@ fn render_search(f: &mut Frame, search: &Search, body: Rect) {
         height,
     };
     let block = Block::bordered()
-        .title(" find task ".bold())
+        .title(search.title.clone().bold())
         .title_bottom(Line::from(" ↑/↓ select · Enter go · Esc cancel ").right_aligned().dim())
         .border_style(Style::new().fg(Color::Yellow));
     let inner = block.inner(area);

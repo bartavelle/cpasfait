@@ -1,0 +1,18 @@
+---
+source: crates/cpasfait-tui/src/tests.rs
+expression: "screen(&mut app, 100, 14)"
+---
+ 1:inbox                                                                                      alice
+ inbox                                                     │ details
+    [ ] Buy paint                                          │Paint fence
+▶   [ ] Paint fence  ⊘blocked                              │
+    [ ] Invite friends  ⊘blocked                           │
+                                                           │status   todo
+                                                           │priority 0
+                                                           │due      -
+                                                           │tags     -
+                                                           │requires ○ Buy paint   ⊘ 1 to do first
+                                                           │blocks   ○ Invite friends
+                                                           │
+                                                           │work log  total 0m
+ NORMAL  “Invite friends” now requires “Paint fence”
