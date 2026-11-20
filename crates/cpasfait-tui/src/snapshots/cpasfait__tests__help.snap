@@ -11,10 +11,10 @@ expression: "screen(&mut app, 100, 30)"
       │              gn       jump to next (most prioritary) task                            │
       │              gs       jump to the task being worked on                               │
       │              ^p /     find a task (fuzzy, all tabs): ↑/↓ choose, Enter go            │
-      │Editing       o/O      new task below/above             a      new subtask            │
+      │Editing       n        new task (beside this one)       a      new subtask            │
       │              i Enter  edit title    cc  replace title   e      notes in $EDITOR      │
       │              x Space  toggle done   dd  delete          u      undo delete           │
-      │              >>/<<    indent/outdent                    J/K    move down/up          │
+      │              >>/<<    indent/outdent       (tasks are sorted by score: + - :due)     │
       │              +/-      priority up/down                 t      edit tags              │
       │Work log      s        start/stop working on the task   S      stop any running work  │
       │View          H        hide/show done tasks             D      toggle detail pane     │

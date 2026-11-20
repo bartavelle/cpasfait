@@ -33,13 +33,21 @@ fn ordering_and_moves() {
     assert!(!r.indent(z).unwrap());
     assert!(r.indent(c).unwrap());
     assert_eq!(titles(&r), "z,a, b, c");
-    assert!(r.shift(c, true).unwrap());
+    // siblings are sorted by score; equal scores keep creation order
+    r.set_priority(c, 1).unwrap();
     assert_eq!(titles(&r), "z,a, c, b");
+    r.set_priority(c, 0).unwrap();
+    assert_eq!(titles(&r), "z,a, b, c");
     assert!(r.outdent(c).unwrap());
     assert_eq!(titles(&r), "z,a, b,c");
+    r.set_priority(c, 2).unwrap();
+    assert_eq!(titles(&r), "c,z,a, b");
+    // indent goes under the task displayed above
+    assert!(r.indent(z).unwrap());
+    assert_eq!(titles(&r), "c, z,a, b");
     assert!(r.move_task(a, Place::LastChildOf(Some(b))).is_err());
     r.delete_task(a).unwrap();
-    assert_eq!(titles(&r), "z,c");
+    assert_eq!(titles(&r), "c, z");
 }
 
 #[test]

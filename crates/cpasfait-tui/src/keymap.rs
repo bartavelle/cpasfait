@@ -16,8 +16,7 @@ pub enum Action {
     NextTab,
     PrevTab,
     GotoTab(usize),
-    AddBelow,
-    AddAbove,
+    AddSibling,
     AddChild,
     EditTitle,
     ReplaceTitle,
@@ -29,8 +28,6 @@ pub enum Action {
     UndoDelete,
     Indent,
     Outdent,
-    MoveUp,
-    MoveDown,
     PriorityUp,
     PriorityDown,
     ToggleWork,
@@ -71,8 +68,7 @@ const BINDINGS: &[(&str, Action)] = &[
     ("gT", Action::PrevTab),
     ("<a-right>", Action::NextTab),
     ("<a-left>", Action::PrevTab),
-    ("o", Action::AddBelow),
-    ("O", Action::AddAbove),
+    ("n", Action::AddSibling),
     ("a", Action::AddChild),
     ("i", Action::EditTitle),
     ("<enter>", Action::EditTitle),
@@ -85,8 +81,6 @@ const BINDINGS: &[(&str, Action)] = &[
     ("u", Action::UndoDelete),
     (">>", Action::Indent),
     ("<<", Action::Outdent),
-    ("K", Action::MoveUp),
-    ("J", Action::MoveDown),
     ("+", Action::PriorityUp),
     ("-", Action::PriorityDown),
     ("s", Action::ToggleWork),
@@ -146,10 +140,10 @@ Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page
               gn       jump to next (most prioritary) task
               gs       jump to the task being worked on
               ^p /     find a task (fuzzy, all tabs): ↑/↓ choose, Enter go
-Editing       o/O      new task below/above             a      new subtask
+Editing       n        new task (beside this one)       a      new subtask
               i Enter  edit title    cc  replace title   e      notes in $EDITOR
               x Space  toggle done   dd  delete          u      undo delete
-              >>/<<    indent/outdent                    J/K    move down/up
+              >>/<<    indent/outdent       (tasks are sorted by score: + - :due)
               +/-      priority up/down                 t      edit tags
 Work log      s        start/stop working on the task   S      stop any running work
 View          H        hide/show done tasks             D      toggle detail pane

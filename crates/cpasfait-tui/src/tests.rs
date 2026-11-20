@@ -77,14 +77,14 @@ fn screen(app: &mut App, w: u16, h: u16) -> String {
 fn create_edit_indent() {
     let (mut app, _) = app();
     assert_eq!(app.tabs[0].name, "inbox");
-    press(&mut app, "oGroceries<enter>aMilk<enter>oEggs<esc>");
+    press(&mut app, "nGroceries<enter>aMilk<enter>nEggs<esc>");
     assert_eq!(titles(&app), vec!["Groceries", "  Milk", "  Eggs"]);
     press(&mut app, "<<");
     assert_eq!(titles(&app), vec!["Groceries", "  Milk", "Eggs"]);
-    press(&mut app, ">>kK");
+    press(&mut app, ">>");
     assert_eq!(titles(&app), vec!["Groceries", "  Milk", "  Eggs"]);
     // Esc on an empty new task discards it
-    press(&mut app, "o<esc>");
+    press(&mut app, "n<esc>");
     assert_eq!(app.rows.len(), 3);
     // edit title
     press(&mut app, "gg");
@@ -97,7 +97,7 @@ fn create_edit_indent() {
 #[test]
 fn fold_done_delete_undo() {
     let (mut app, _) = app();
-    press(&mut app, "oA<enter>aB<enter>gg");
+    press(&mut app, "nA<enter>aB<enter>gg");
     press(&mut app, "h");
     assert_eq!(titles(&app), vec!["A"]);
     press(&mut app, "l");
@@ -113,7 +113,7 @@ fn fold_done_delete_undo() {
 #[test]
 fn work_toggle_and_commands() {
     let (mut app, time) = app();
-    press(&mut app, "oWrite report<enter>");
+    press(&mut app, "nWrite report<enter>");
     press(&mut app, "s");
     assert!(app.active.is_some());
     time.fetch_add(90_000, Ordering::SeqCst);
@@ -150,7 +150,13 @@ fn work_toggle_and_commands() {
 #[test]
 fn next_task_jump() {
     let (mut app, _) = app();
-    press(&mut app, "oA<enter>oB<enter>+gg");
+    press(&mut app, "nA<enter>nB<enter>");
+    assert_eq!(titles(&app), vec!["A", "B"]);
+    // a higher score moves it up, and the cursor follows it
+    press(&mut app, "+");
+    assert_eq!(titles(&app), vec!["B", "A"]);
+    assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, "B");
+    press(&mut app, "G");
     assert_eq!(app.repo.task(app.next.unwrap()).unwrap().title, "B");
     press(&mut app, "gn");
     assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, "B");
@@ -161,7 +167,7 @@ fn tab_join_through_directory() {
     let remote = tempfile::tempdir().unwrap();
     let dir = remote.path().to_str().unwrap().to_owned();
     let (mut a, _) = app();
-    press(&mut a, "oShared task<enter>");
+    press(&mut a, "nShared task<enter>");
     press(&mut a, &format!(":tabremote {dir}<enter>"));
     let (mut b, _) = app();
     let key = b.identity.as_ref().unwrap().recipient().to_owned();
@@ -185,7 +191,7 @@ fn render_snapshot() {
     let (mut app, _) = app();
     press(
         &mut app,
-        "oProject<enter>aDesign<enter>oBuild<enter>:due 2099-01-01<enter>",
+        "nProject<enter>aDesign<enter>nBuild<enter>:due 2099-01-01<enter>",
     );
     press(&mut app, ":tag +dev<enter>xggs");
     assert!(matches!(app.mode, Mode::Normal));
@@ -214,7 +220,7 @@ fn alt_arrows_switch_tabs() {
 #[test]
 fn tag_editor() {
     let (mut app, _) = app();
-    press(&mut app, "ofirst<esc>");
+    press(&mut app, "nfirst<esc>");
     let id = app.selected().unwrap();
     let tags = |app: &App| app.repo.task(id).unwrap().tags;
     press(&mut app, "twork #urgent,home<enter>");
@@ -242,7 +248,7 @@ fn tag_editor() {
 fn time_box_cycles_periods() {
     let (mut app, time) = app();
     app.tz = jiff::tz::TimeZone::UTC;
-    press(&mut app, "oAlpha<enter>oBeta<enter>oGamma<enter>oDelta<enter>");
+    press(&mut app, "nAlpha<enter>nBeta<enter>nGamma<enter>nDelta<enter>");
     let at = |d: i8, h: i8, m: i8| {
         jiff::civil::date(2023, 11, d)
             .at(h, m, 0, 0)
@@ -294,12 +300,12 @@ fn ctrl_p_finds_tasks_across_tabs() {
     let (mut app, _) = app();
     press(
         &mut app,
-        "oWrite report<enter>aDraft outline<enter>oReview figures<enter>",
+        "nWrite report<enter>aDraft outline<enter>nReview figures<enter>",
     );
     press(&mut app, "ggl<tab>"); // fold "Write report"
-    press(&mut app, "ggoPrepare taxes<enter>x"); // done
+    press(&mut app, "ggnPrepare taxes<enter>x"); // done
     press(&mut app, "H"); // hide done tasks
-    press(&mut app, ":tabnew Home<enter>oRepaint fence<enter>");
+    press(&mut app, ":tabnew Home<enter>nRepaint fence<enter>");
     let ctrl = |app: &mut App, c| app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
     let hits = |app: &App| match &app.mode {
         Mode::Search(s) => s
@@ -343,7 +349,7 @@ fn ctrl_p_finds_tasks_across_tabs() {
 #[test]
 fn require_and_block_commands() {
     let (mut app, _) = app();
-    press(&mut app, "oBuy paint<enter>oPaint fence<enter>oInvite friends<enter>");
+    press(&mut app, "nBuy paint<enter>nPaint fence<enter>nInvite friends<enter>");
     let id = |app: &App, title: &str| app.tree.iter().find(|t| t.title == title).unwrap().id;
     let (paint, buy, invite) = (
         id(&app, "Paint fence"),
@@ -392,10 +398,10 @@ fn dependencies_across_tabs_in_tui() {
     use cpasfait_core::backend::localdir::LocalDir;
     use cpasfait_core::sync::sync_tab;
     let (mut app, _) = app();
-    press(&mut app, "oWrite report<enter>");
+    press(&mut app, "nWrite report<enter>");
     let report = app.selected().unwrap();
     let work = app.tabs[app.tab_idx].id;
-    press(&mut app, ":tabnew Home<enter>oFix car<enter>");
+    press(&mut app, ":tabnew Home<enter>nFix car<enter>");
     let car = app.selected().unwrap();
     // From Home: "Fix car" blocks a task of another tab.
     press(&mut app, ":block report<enter>");
@@ -471,7 +477,7 @@ fn sharing_a_tab() {
     let dir = remote.path().display().to_string();
     let backend = LocalDir::new(remote.path());
     let (mut alice, _) = app();
-    press(&mut alice, "oPaint<enter>");
+    press(&mut alice, "nPaint<enter>");
     press(&mut alice, ":tabinvite age1x<enter>");
     assert!(message(&alice).contains("not shared"), "{}", message(&alice));
     press(&mut alice, &format!(":tabremote {dir}<enter>"));
@@ -541,7 +547,7 @@ fn moving_a_tab_between_remotes() {
     let (one, two) = (tmp.path().join("one"), tmp.path().join("two"));
     let (mut alice, _) = app();
     let (mut bob, _) = app();
-    press(&mut alice, "oPaint<enter>");
+    press(&mut alice, "nPaint<enter>");
     press(&mut alice, &format!(":tabremote {}<enter>", one.display()));
     let bob_key = bob.identity.as_ref().unwrap().recipient().to_owned();
     press(&mut alice, &format!(":tabinvite {bob_key} bob<enter>"));

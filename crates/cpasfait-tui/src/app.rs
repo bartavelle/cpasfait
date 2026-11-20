@@ -553,14 +553,11 @@ impl App {
                     self.switch_tab()?;
                 }
             }
-            AddBelow => self.add(|sel| match sel {
-                Some(s) => Place::After(s),
-                None => Place::LastChildOf(None),
-            })?,
-            AddAbove => self.add(|sel| match sel {
-                Some(s) => Place::Before(s),
-                None => Place::FirstChildOf(None),
-            })?,
+            AddSibling => {
+                // Its place among the siblings follows from its score.
+                let parent = sel.and_then(|s| self.tree.parent(s));
+                self.add(|_| Place::LastChildOf(parent))?
+            }
             AddChild => {
                 if let Some(s) = sel {
                     self.collapsed.remove(&s);
@@ -610,7 +607,7 @@ impl App {
                 }
                 None => self.info("nothing to undo"),
             },
-            Indent | Outdent | MoveUp | MoveDown => {
+            Indent | Outdent => {
                 if let Some(id) = sel {
                     let moved = match action {
                         Indent => {
@@ -620,9 +617,7 @@ impl App {
                             }
                             r
                         }
-                        Outdent => self.repo.outdent(id)?,
-                        MoveUp => self.repo.shift(id, true)?,
-                        _ => self.repo.shift(id, false)?,
+                        _ => self.repo.outdent(id)?,
                     };
                     if moved {
                         self.refresh()?;

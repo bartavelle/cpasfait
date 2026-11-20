@@ -144,6 +144,8 @@ Milestones 1–6 are implemented. Deviations from the plan above:
   vectors. On a 5,000-task tab a run takes about 7 ms, of which about 1.7 ms is process startup.
 - `u` only undoes deletions made in the current session. General undo is still to do.
 - Sibling placement queries siblings directly instead of building the tree, so adding a task does not get slower as the tab grows.
+- Siblings are displayed by decreasing score (`Tree::sort_by_score`, applied by `Repo::tree`; `Repo::structure` stays
+  unsorted for `cpasfait-next`). `o`/`O` became `n` (new sibling) and `J`/`K` were removed: positions only break ties.
 
 Known limitations / next steps:
 - Google Drive backend (cargo feature `gdrive`, on by default in the binaries): `backend/gdrive/` with the path

@@ -600,10 +600,10 @@ impl Repo {
         self.commit(edits)
     }
 
-    /// Make the task the last child of its previous sibling.
+    /// Make the task a child of its previous sibling (in display order).
     pub fn indent(&mut self, task: TaskId) -> Result<bool> {
         let t = self.task(task)?;
-        let tree = self.structure(t.tab)?;
+        let tree = self.tree(t.tab)?;
         let sib = tree.children(tree.parent(task));
         let i = sib.iter().position(|&s| s == task).unwrap_or(0);
         if i == 0 {
@@ -621,31 +621,6 @@ impl Repo {
             None => Ok(false),
             Some(p) => {
                 self.move_task(task, Place::After(p))?;
-                Ok(true)
-            }
-        }
-    }
-
-    /// Swap with the previous (`up`) or next sibling.
-    pub fn shift(&mut self, task: TaskId, up: bool) -> Result<bool> {
-        let t = self.task(task)?;
-        let tree = self.structure(t.tab)?;
-        let sib = tree.children(tree.parent(task));
-        let i = sib.iter().position(|&s| s == task).unwrap_or(0);
-        let target = if up {
-            i.checked_sub(1)
-        } else {
-            Some(i + 1).filter(|&j| j < sib.len())
-        };
-        match target {
-            None => Ok(false),
-            Some(j) => {
-                let place = if up {
-                    Place::Before(sib[j])
-                } else {
-                    Place::After(sib[j])
-                };
-                self.move_task(task, place)?;
                 Ok(true)
             }
         }
@@ -1072,9 +1047,11 @@ impl Repo {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// A tab's tree, siblings ordered by decreasing score ([`Tree::sort_by_score`]).
     pub fn tree(&self, tab: TabId) -> Result<Tree> {
         let mut tree = Tree::build(self.tasks(tab)?);
         self.fill_external(&mut tree)?;
+        tree.sort_by_score();
         Ok(tree)
     }
 

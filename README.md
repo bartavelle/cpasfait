@@ -28,7 +28,8 @@ The database is `$CPASFAIT_DATA_DIR/cpasfait.db`, or by default
 
 Press `?` in the TUI for all keys. The essentials:
 
-- `j`/`k` move, `h`/`l` fold or unfold, `o`/`O`/`a` add below/above/child, `i` edit, `x` done, `dd` delete
+- `j`/`k` move, `h`/`l` fold or unfold, `n`/`a` add a task / a subtask, `i` edit, `x` done, `dd` delete
+- Tasks are sorted by score (see below) among their siblings, done ones last: `+`/`-` and `:due` move them
 - `>>`/`<<` indent or outdent, `J`/`K` reorder, `+`/`-` priority
 - `s` start or stop working on the task; `S` stops whatever is running
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
@@ -151,7 +152,7 @@ Each open task has a score, shown in the details pane:
 - a task that blocks others adds the scores of the open tasks that require it
   (transitively, across tabs), so whatever unblocks important work comes first.
 
-The next task (`gn`, `cpasfait-next`) is the actionable task with the highest score.
+Within each level of the tree, tasks are listed by decreasing score (earlier due date first on ties, then creation order), done tasks last. The next task (`gn`, `cpasfait-next`) is the actionable task with the highest score.
 
 ### Companion tools
 

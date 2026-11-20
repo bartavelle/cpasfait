@@ -319,6 +319,52 @@ impl Tree {
             .collect()
     }
 
+    /// Order siblings by decreasing score (then earliest due date, none
+    /// last), done tasks after the open ones; ties keep the current order
+    /// (positions, i.e. creation order). Call once the external information
+    /// ([`Tree::set_external`], [`Tree::set_external_blocking`], today) is set.
+    pub fn sort_by_score(&mut self) {
+        let n = self.tasks.len();
+        let active = self.active();
+        let scores = self.score_vec(&active);
+        let keys: Vec<_> = (0..n)
+            .map(|i| {
+                let t = &self.tasks[i];
+                let s = scores[i].map(|s| s.total());
+                (
+                    s.is_none(),
+                    std::cmp::Reverse(s.unwrap_or(0)),
+                    t.due.is_none(),
+                    t.due,
+                    i,
+                )
+            })
+            .collect();
+        let index = &self.index;
+        let by_key = |a: &TaskId, b: &TaskId| keys[index[a]].cmp(&keys[index[b]]);
+        self.roots.sort_by(by_key);
+        for c in self.children.iter_mut() {
+            c.sort_by(by_key);
+        }
+        // Renumber in the new pre-order.
+        let mut order: Vec<usize> = Vec::with_capacity(n);
+        let mut stack: Vec<usize> = self.roots.iter().rev().map(|r| self.index[r]).collect();
+        while let Some(i) = stack.pop() {
+            order.push(i);
+            stack.extend(self.children[i].iter().rev().map(|c| self.index[c]));
+        }
+        let mut new_of = vec![NONE; n];
+        for (new, &old) in order.iter().enumerate() {
+            new_of[old] = new;
+        }
+        let mut tasks: Vec<Option<Task>> = std::mem::take(&mut self.tasks).into_iter().map(Some).collect();
+        let mut children = std::mem::take(&mut self.children);
+        self.tasks = order.iter().map(|&o| tasks[o].take().expect("each once")).collect();
+        self.children = order.iter().map(|&o| std::mem::take(&mut children[o])).collect();
+        self.parent = order.iter().map(|&o| self.parent[o].map(|p| new_of[p])).collect();
+        self.index = self.tasks.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
+    }
+
     /// Tasks of this tree that `id` requires (unknown and hidden ones left out).
     pub fn blockers(&self, id: TaskId) -> Vec<TaskId> {
         self.get(id)
@@ -543,6 +589,39 @@ mod tests {
         tb_del.deleted = true;
         let t = Tree::build(vec![ta, tb_del, tc]);
         assert_eq!(t.next_task(), Some(a));
+    }
+
+    #[test]
+    fn siblings_sorted_by_score() {
+        let p = TaskId::new();
+        let mk = |title: &str, parent: Option<TaskId>, pos: &str| {
+            let mut t = task(TaskId::new(), parent, pos);
+            t.title = title.into();
+            t
+        };
+        let mut a = mk("a", None, "a");
+        let mut b = mk("b", None, "b");
+        let c = mk("c", None, "c");
+        let mut d = mk("d", None, "d");
+        let mut parent = task(p, None, "e");
+        parent.title = "p".into();
+        let (k1, mut k2) = (mk("k1", Some(p), "a"), mk("k2", Some(p), "b"));
+        a.status = Status::Done;
+        a.priority = 9;
+        b.priority = 1;
+        d.priority = 1;
+        d.due = Some(jiff::civil::date(2026, 12, 1));
+        k2.priority = 2;
+        let mut t = Tree::build(vec![a, b, c, d, parent, k1, k2]);
+        t.set_today(jiff::civil::date(2026, 11, 20));
+        t.sort_by_score();
+        let titles: Vec<&str> = t.iter().map(|x| x.title.as_str()).collect();
+        // d: 1 + due; b: 1; then c and p (score 0, creation order); a done last
+        assert_eq!(titles, ["d", "b", "c", "p", "k2", "k1", "a"]);
+        assert_eq!(t.children(Some(p)).len(), 2);
+        assert_eq!(t.parent(t.children(Some(p))[0]), Some(p));
+        let rows: Vec<usize> = t.rows(&Default::default(), false).iter().map(|r| r.depth).collect();
+        assert_eq!(rows, [0, 0, 0, 0, 1, 1, 0]);
     }
 
     #[test]

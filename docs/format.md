@@ -63,7 +63,8 @@ An entity exists as soon as any op targets it. Missing fields take their default
 
 ### Tree rules
 
-- Siblings are ordered by `(position, id)`. Positions are strings over
+- Clients display siblings by decreasing score (see the README); `(position, id)` is the order among equal
+  scores (creation order for tasks added at the end). Positions are strings over
   `0-9A-Za-z` (ASCII order), never ending in `0`. A key strictly between any
   two keys always exists (`position::key_between`).
 - A parent that is unknown locally: the task is shown at the root until the parent arrives.
