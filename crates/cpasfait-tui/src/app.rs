@@ -67,6 +67,8 @@ pub struct App {
     pub open_sessions: Vec<Session>,
     /// Sessions of the selected task.
     pub detail_sessions: Vec<Session>,
+    /// Scores of the open tasks of the current tab.
+    pub scores: std::collections::HashMap<TaskId, cpasfait_core::score::Score>,
     /// Requirements of the selected task and what it blocks.
     pub detail_deps: cpasfait_core::Dependencies,
     pub next: Option<TaskId>,
@@ -102,6 +104,7 @@ impl App {
             active: None,
             open_sessions: vec![],
             detail_sessions: vec![],
+            scores: Default::default(),
             detail_deps: Default::default(),
             next: None,
             sync_status: None,
@@ -169,6 +172,7 @@ impl App {
                 self.tree = self.repo.tree(tab)?;
                 self.open_sessions = self.repo.open_sessions(tab)?;
                 self.next = self.tree.next_task();
+                self.scores = self.tree.scores();
             }
             None => {
                 self.tree = Tree::default();

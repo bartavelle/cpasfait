@@ -16,6 +16,7 @@ pub mod position;
 pub mod repo;
 pub mod report;
 mod schema;
+pub mod score;
 pub mod sync;
 pub mod tree;
 

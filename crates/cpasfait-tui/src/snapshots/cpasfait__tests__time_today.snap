@@ -9,8 +9,8 @@ expression: "screen(&mut app, 90, 14)"
     [ ] Gamma                                        │
     [ ] Delta                                        │status   todo
                                                      │priority 0
+                                                     │score    0
                                                      │due      -
-                                                     │tags     -
                                               ┌ time · today ────────────────────────────┐
                                               │Beta                                2h 05m│
                                               │Alpha                                  40m│

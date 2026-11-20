@@ -9,10 +9,10 @@ expression: "screen(&mut app, 100, 14)"
     [ ] Invite friends  ⊘blocked                           │
                                                            │status   todo
                                                            │priority 0
+                                                           │score    0
                                                            │due      -
                                                            │tags     -
                                                            │requires ○ Buy paint   ⊘ 1 to do first
                                                            │blocks   ○ Invite friends
                                                            │
-                                                           │work log  total 0m
  NORMAL  “Invite friends” now requires “Paint fence”

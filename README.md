@@ -76,12 +76,25 @@ Notes:
   authorization after 7 days; run `cpasfait-gdrive login` again (the client is
   remembered). Publishing the app, or a Workspace "Internal" app, avoids this.
 
+### Scores
+
+Each open task has a score, shown in the details pane:
+
+- `priority × 100`, so priority matters most;
+- a due date adds `10 + 80 / (1 + days left / 7)`: 90 when due today or
+  overdue, 50 a week ahead, about 25 a month ahead. At equal priority a task
+  with a deadline beats one without, and gets more urgent as it approaches,
+  but never by a whole priority level;
+- a task that blocks others adds the scores of the open tasks that require it
+  (transitively, across tabs), so whatever unblocks important work comes first.
+
+The next task (`gn`, `cpasfait-next`) is the actionable task with the highest score.
+
 ### Companion tools
 
 `cpasfait-next [--tab T] [-p] [-l] [--json]` prints the most important task:
 not done, without open subtasks, not blocked by an unfinished requirement,
-highest priority first, then earliest due
-date, then tree order. Exit status is 2 when there is nothing to do. It opens
+highest score first, then earliest due date, then tree order. Exit status is 2 when there is nothing to do. It opens
 the database read-only and takes a few milliseconds, so it suits status bars.
 
 `cpasfait-report [--from D] [--to D] [--tab T] [--user U] [--by task|tab|user|day] [--json]`

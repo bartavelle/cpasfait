@@ -562,7 +562,60 @@ impl Repo {
             }
         }
         tree.set_external(m);
+        tree.set_today(self.today());
+
+        // Open tasks outside the tree that require tasks of the tree (other
+        // tabs): their scores raise their blockers' scores.
+        let Some(tab) = tree.iter().next().map(|t| t.tab) else {
+            return Ok(());
+        };
+        let mut st = self.conn.prepare_cached(
+            "SELECT d.blocker, d.task FROM task_dep d JOIN task b ON b.id = d.blocker WHERE b.tab = ?1",
+        )?;
+        let links: Vec<(String, String)> = st
+            .query_map(params![tab.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut blocking: std::collections::HashMap<TaskId, i64> = Default::default();
+        for (blocker, dependent) in links {
+            let (blocker, dependent): (TaskId, TaskId) = (parse_id(&blocker)?, parse_id(&dependent)?);
+            if tree.contains(blocker) && !tree.contains(dependent) {
+                let s = self.total_score(dependent, &mut Default::default())?;
+                *blocking.entry(blocker).or_default() += s;
+            }
+        }
+        tree.set_external_blocking(blocking);
         Ok(())
+    }
+
+    /// Today's date in the local time zone, according to this repo's clock.
+    pub fn today(&self) -> jiff::civil::Date {
+        jiff::Timestamp::from_millisecond(self.now_ms())
+            .map(|t| t.to_zoned_datetime(jiff::tz::TimeZone::system()).date())
+            .unwrap_or_else(|_| crate::dates::today_local())
+    }
+
+    /// Total score of an open task computed from the database, following
+    /// the tasks that require it across tabs (0 if done, deleted or unknown).
+    fn total_score(&self, id: TaskId, seen: &mut std::collections::HashSet<TaskId>) -> Result<i64> {
+        if !seen.insert(id) || self.task_done(id)? != Some(false) {
+            return Ok(0);
+        }
+        let (priority, due): (i64, Option<String>) = self.conn.query_row(
+            "SELECT priority, due FROM task WHERE id = ?1",
+            params![id.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let mut total = crate::score::own_score(priority, due.and_then(|d| d.parse().ok()), self.today()).total();
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT task FROM task_dep WHERE blocker = ?1")?;
+        let deps: Vec<String> = st
+            .query_map(params![id.to_string()], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        for d in deps {
+            total += self.total_score(parse_id(&d)?, seen)?;
+        }
+        Ok(total)
     }
 
     /// What `task` requires and what requires it, for display.

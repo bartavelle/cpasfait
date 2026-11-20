@@ -8,6 +8,7 @@
 
 use crate::ids::TaskId;
 use crate::model::Task;
+use crate::score::{Score, own_score};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +29,11 @@ pub struct Tree {
     /// Done-state of required tasks outside this tree (other tabs). Absent =
     /// unknown or deleted: does not block.
     external: HashMap<TaskId, bool>,
+    /// Per task: summed scores of the open tasks outside this tree that
+    /// require it.
+    external_blocking: HashMap<TaskId, i64>,
+    /// "Today" for due-date scores (default: the local date).
+    today: Option<jiff::civil::Date>,
 }
 
 const NONE: usize = usize::MAX;
@@ -116,6 +122,8 @@ impl Tree {
             children,
             roots,
             external: HashMap::new(),
+            external_blocking: HashMap::new(),
+            today: None,
         }
     }
 
@@ -230,6 +238,87 @@ impl Tree {
         self.external = done;
     }
 
+    pub fn set_external_blocking(&mut self, scores: HashMap<TaskId, i64>) {
+        self.external_blocking = scores;
+    }
+
+    pub fn set_today(&mut self, today: jiff::civil::Date) {
+        self.today = Some(today);
+    }
+
+    fn today(&self) -> jiff::civil::Date {
+        self.today.unwrap_or_else(crate::dates::today_local)
+    }
+
+    /// Not done and no done ancestor, per index.
+    fn active(&self) -> Vec<bool> {
+        let mut active = vec![false; self.tasks.len()];
+        for i in 0..self.tasks.len() {
+            active[i] = !self.tasks[i].is_done() && self.parent[i].is_none_or(|p| active[p]);
+        }
+        active
+    }
+
+    /// Scores of the open tasks (see [`crate::score`]), per index (`None` for
+    /// done ones). Requirement cycles are cut where the walk re-enters them.
+    fn score_vec(&self, active: &[bool]) -> Vec<Option<Score>> {
+        let n = self.tasks.len();
+        let today = self.today();
+        // dependents[j]: open tasks of this tree requiring task j
+        let mut dependents: Vec<Vec<usize>> = vec![vec![]; n];
+        for (i, t) in self.tasks.iter().enumerate() {
+            if !active[i] {
+                continue;
+            }
+            for b in &t.blocked_by {
+                if let Some(&j) = self.index.get(b) {
+                    dependents[j].push(i);
+                }
+            }
+        }
+        let mut out: Vec<Option<Score>> = vec![None; n];
+        let mut state = vec![0u8; n]; // 0 new, 1 in progress, 2 done
+        for root in 0..n {
+            if !active[root] || state[root] != 0 {
+                continue;
+            }
+            // Iterative post-order DFS over "is required by" edges.
+            let mut stack = vec![(root, 0usize)];
+            state[root] = 1;
+            while let Some(&mut (i, ref mut k)) = stack.last_mut() {
+                if let Some(&d) = dependents[i].get(*k) {
+                    *k += 1;
+                    if state[d] == 0 {
+                        state[d] = 1;
+                        stack.push((d, 0));
+                    }
+                    continue;
+                }
+                stack.pop();
+                let t = &self.tasks[i];
+                let mut s = own_score(t.priority, t.due, today);
+                s.blocking = self.external_blocking.get(&t.id).copied().unwrap_or(0)
+                    + dependents[i]
+                        .iter()
+                        .filter_map(|&d| out[d].map(|x| x.total()))
+                        .sum::<i64>();
+                out[i] = Some(s);
+                state[i] = 2;
+            }
+        }
+        out
+    }
+
+    /// Scores of the open tasks.
+    pub fn scores(&self) -> HashMap<TaskId, Score> {
+        let active = self.active();
+        self.score_vec(&active)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, s)| Some((self.tasks[i].id, s?)))
+            .collect()
+    }
+
     /// Tasks of this tree that `id` requires (unknown and hidden ones left out).
     pub fn blockers(&self, id: TaskId) -> Vec<TaskId> {
         self.get(id)
@@ -289,8 +378,8 @@ impl Tree {
     /// - not done, with no done ancestor (done hides the subtree's remaining work);
     /// - a leaf with respect to open work (no child still to do);
     /// - not blocked by a task still to do;
-    /// - ordered by priority (highest first), then due date (earliest first,
-    ///   none last), then tree order.
+    /// - ordered by score (highest first, see [`crate::score`]), then due
+    ///   date (earliest first, none last), then tree order.
     pub fn next_task(&self) -> Option<TaskId> {
         let n = self.tasks.len();
         let mut open_child = vec![false; n];
@@ -304,9 +393,11 @@ impl Tree {
                 open_child[p] = true;
             }
         }
+        let scores = self.score_vec(&active);
         let key = |i: usize| {
             let t = &self.tasks[i];
-            (std::cmp::Reverse(t.priority), t.due.is_none(), t.due, i)
+            let s = scores[i].map(|s| s.total()).unwrap_or(0);
+            (std::cmp::Reverse(s), t.due.is_none(), t.due, i)
         };
         let blocked = |i: usize| {
             self.tasks[i].blocked_by.iter().any(|b| match self.index.get(b) {
@@ -452,5 +543,62 @@ mod tests {
         tb_del.deleted = true;
         let t = Tree::build(vec![ta, tb_del, tc]);
         assert_eq!(t.next_task(), Some(a));
+    }
+
+    #[test]
+    fn scores_and_ranking() {
+        use jiff::civil::date;
+        let today = date(2026, 11, 20);
+        let ids: Vec<TaskId> = (0..5).map(|_| TaskId::new()).collect();
+        let mk = |i: usize, prio: i64, due: Option<jiff::civil::Date>| {
+            let mut t = task(ids[i], None, &i.to_string());
+            t.priority = prio;
+            t.due = due;
+            t
+        };
+        let build = |tasks: Vec<Task>| {
+            let mut t = Tree::build(tasks);
+            t.set_today(today);
+            t
+        };
+        // same priority: a deadline wins, the nearer the better
+        let t = build(vec![
+            mk(0, 1, None),
+            mk(1, 1, Some(date(2027, 6, 1))),
+            mk(2, 1, Some(date(2026, 11, 22))),
+        ]);
+        assert_eq!(t.next_task(), Some(ids[2]));
+        let s = t.scores();
+        assert_eq!(s[&ids[0]].total(), 100);
+        assert!(s[&ids[1]].total() > 100 && s[&ids[1]].total() < s[&ids[2]].total());
+        // but priority dominates
+        let t = build(vec![mk(0, 2, None), mk(2, 1, Some(date(2026, 11, 1)))]);
+        assert_eq!(t.next_task(), Some(ids[0]));
+
+        // blocking adds the blocked tasks' scores, transitively
+        let a = mk(0, 0, None); // blocks b
+        let mut b = mk(1, 3, None); // blocks c
+        b.blocked_by = vec![ids[0]];
+        let mut c = mk(2, 5, None);
+        c.blocked_by = vec![ids[1]];
+        let d = mk(3, 6, None); // unrelated, higher than anything on its own
+        let t = build(vec![a.clone(), b.clone(), c.clone(), d.clone()]);
+        let s = t.scores();
+        assert_eq!(s[&ids[2]].total(), 500);
+        assert_eq!(s[&ids[1]].total(), 300 + 500);
+        assert_eq!((s[&ids[0]].blocking, s[&ids[0]].total()), (800, 800));
+        assert_eq!(t.next_task(), Some(ids[0]), "unblocks 800 worth of work");
+        // a done blocked task no longer counts
+        let mut c_done = c.clone();
+        c_done.status = Status::Done;
+        let t = build(vec![a.clone(), b.clone(), c_done, d.clone()]);
+        assert_eq!(t.scores()[&ids[0]].total(), 300);
+        assert_eq!(t.next_task(), Some(ids[3]));
+        // cycles (concurrent edits) terminate
+        let mut a2 = a;
+        a2.blocked_by = vec![ids[2]];
+        let t = build(vec![a2, b, c, d]);
+        assert!(t.scores().len() == 4);
+        assert_eq!(t.next_task(), Some(ids[3]));
     }
 }

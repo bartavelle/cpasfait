@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// Print the most prioritary actionable task of a tab: not done, without open
-/// subtasks, highest priority first, then earliest due date, then tree order.
+/// subtasks, not blocked; highest score first (priority × 100, plus up to 90
+/// as the due date nears, plus the scores of the tasks it blocks), then
+/// earliest due date, then tree order.
 #[derive(Parser)]
 #[command(version)]
 struct Args {
@@ -38,6 +40,8 @@ struct Out<'a> {
     title: &'a str,
     path: Vec<&'a str>,
     priority: i64,
+    /// See `cpasfait_core::score`.
+    score: i64,
     due: Option<String>,
     tags: &'a [String],
 }
@@ -63,6 +67,7 @@ fn run() -> Result<bool> {
         return Ok(false);
     };
     let t = repo.task(id)?;
+    let score = tree.scores().get(&id).map(|s| s.total()).unwrap_or(0);
     let mut path = vec![];
     for a in tree.ancestors(id).into_iter().rev() {
         path.push(repo.task(a)?.title);
@@ -76,6 +81,7 @@ fn run() -> Result<bool> {
             title: &t.title,
             path,
             priority: t.priority,
+            score,
             due: t.due.map(|d| d.to_string()),
             tags: &t.tags,
         };
@@ -87,6 +93,7 @@ fn run() -> Result<bool> {
         if t.priority > 0 {
             line.push_str(&format!(" !{}", t.priority));
         }
+        line.push_str(&format!(" score:{score}"));
         if let Some(d) = t.due {
             line.push_str(&format!(" due:{d}"));
         }

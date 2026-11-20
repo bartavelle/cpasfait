@@ -7,6 +7,7 @@ use crate::search::short_id;
 use crate::timebox::{self, TimePeriod};
 use cpasfait_core::dates::today_local;
 use cpasfait_core::report::fmt_duration;
+use cpasfait_core::score::Score;
 use cpasfait_core::{DepInfo, DepState, Session, Task};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
@@ -233,6 +234,7 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             Span::raw(if t.is_done() { "done" } else { "todo" }),
         ]),
         Line::from(vec![label("priority"), Span::raw(t.priority.to_string())]),
+        score_line(app.scores.get(&t.id), label("score")),
         Line::from(vec![
             label("due"),
             match t.due {
@@ -333,6 +335,24 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.push(session_line(s, now));
     }
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+/// `score    750  priority 300 + due 50 + blocking 400`
+fn score_line(score: Option<&Score>, label: Span<'static>) -> Line<'static> {
+    let Some(s) = score else {
+        return Line::from(vec![label, Span::raw("-").dim()]);
+    };
+    let mut parts = vec![];
+    for (name, v) in [("priority", s.priority), ("due", s.due), ("blocking", s.blocking)] {
+        if v != 0 {
+            parts.push(format!("{name} {v}"));
+        }
+    }
+    let mut spans = vec![label, Span::styled(s.total().to_string(), Style::new().bold())];
+    if parts.len() > 1 || s.priority == 0 && !parts.is_empty() {
+        spans.push(Span::raw(format!("  {}", parts.join(" + "))).dim());
+    }
+    Line::from(spans)
 }
 
 /// Why a dependency cannot be checked, if it cannot.

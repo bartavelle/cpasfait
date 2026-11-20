@@ -11,10 +11,10 @@ expression: "screen(&mut app, 90, 16)"
      │  Write report  [inbox]                                                       │
      │  Prepare taxes  [inbox]                                                      │
      └────────────────────────────────────────── ↑/↓ select · Enter go · Esc cancel ┘
+                                                     │tags     -
                                                      │★ next task in this tab
                                                      │
                                                      │work log  total 0m
-                                                     │
                                                      │
                                                      │
  FIND
