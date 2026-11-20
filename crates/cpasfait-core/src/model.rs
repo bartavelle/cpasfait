@@ -68,6 +68,17 @@ impl RemoteConfig {
     }
 }
 
+impl RemoteConfig {
+    /// The spec this remote was parsed from (round-trips through [`RemoteConfig::parse`]).
+    pub fn spec(&self) -> String {
+        match self {
+            Self::LocalDir { path } => path.clone(),
+            Self::GDrive { folder } => format!("gdrive:{folder}"),
+            Self::Rsync { target } => format!("rsync:{target}"),
+        }
+    }
+}
+
 impl std::fmt::Display for RemoteConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -83,6 +94,18 @@ pub struct TabInfo {
     pub id: TabId,
     pub name: String,
     pub remote: Option<RemoteConfig>,
+    /// A move to another remote, made elsewhere, that this device has not
+    /// followed yet.
+    pub pending_move: Option<RemoteMove>,
+}
+
+/// "This tab now lives at `remote`" (a spec as accepted by [`RemoteConfig::parse`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RemoteMove {
+    pub id: uuid::Uuid,
+    pub remote: String,
+    /// Who moved it.
+    pub by: String,
 }
 
 /// A member of a shared tab.
@@ -222,6 +245,10 @@ mod tests {
             }
         );
         assert_eq!(r.to_string(), "rsync:me@box:cpasfait/shared");
+        for spec in ["rsync:me@box:x", "gdrive:abc", "/srv/x"] {
+            let r = RemoteConfig::parse(spec).unwrap();
+            assert_eq!(RemoteConfig::parse(&r.spec()).unwrap(), r);
+        }
         assert!(RemoteConfig::parse("rsync:box:/srv/x").is_ok());
         for bad in ["rsync:/local/path", "rsync:box:", "rsync::x", "rsync:-oProxy=x:y"] {
             assert!(RemoteConfig::parse(bad).is_err(), "{bad}");

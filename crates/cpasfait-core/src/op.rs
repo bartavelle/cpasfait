@@ -55,6 +55,9 @@ pub enum Change {
         recipient: String,
         name: Option<String>,
     },
+    /// The tab's data was moved to another remote (see [`crate::sync::move_tab`]).
+    /// Wire value: `{"id": uuid, "remote": spec, "by": user}`.
+    TabMove(crate::model::RemoteMove),
 
     TaskTitle(String),
     TaskNotes(String),
@@ -104,7 +107,7 @@ impl Change {
     pub fn kind(&self) -> EntityKind {
         use Change::*;
         match self {
-            TabName(_) | TabDeleted(_) | TabMember { .. } => EntityKind::Tab,
+            TabName(_) | TabDeleted(_) | TabMember { .. } | TabMove(_) => EntityKind::Tab,
             TaskTitle(_)
             | TaskNotes(_)
             | TaskStatus(_)
@@ -127,6 +130,7 @@ impl Change {
             TabName(_) => "tab.name".into(),
             TabDeleted(_) => "tab.deleted".into(),
             TabMember { recipient, .. } => format!("{MEMBER_PREFIX}{recipient}"),
+            TabMove(_) => "tab.move".into(),
             TaskTitle(_) => "task.title".into(),
             TaskNotes(_) => "task.notes".into(),
             TaskStatus(_) => "task.status".into(),
@@ -155,6 +159,7 @@ impl Change {
             TaskTag { on, .. } => json!(on),
             TabMember { name: Some(n), .. } => json!(n),
             TabMember { name: None, .. } => json!(false),
+            TabMove(m) => json!({"id": m.id.to_string(), "remote": m.remote, "by": m.by}),
             TaskBlockedBy { on: false, .. } => json!(false),
             TaskBlockedBy { tab: None, .. } => json!(true),
             TaskBlockedBy { tab: Some(tab), .. } => json!(tab.0.to_string()),
@@ -220,6 +225,11 @@ impl Change {
         Some(match field {
             "tab.name" => TabName(s()?),
             "tab.deleted" => TabDeleted(b()?),
+            "tab.move" => TabMove(crate::model::RemoteMove {
+                id: value.get("id")?.as_str()?.parse().ok()?,
+                remote: value.get("remote")?.as_str()?.to_owned(),
+                by: value.get("by")?.as_str()?.to_owned(),
+            }),
             "task.title" => TaskTitle(s()?),
             "task.notes" => TaskNotes(s()?),
             "task.status" => TaskStatus(Status::parse(value.as_str()?)?),
@@ -278,6 +288,11 @@ mod tests {
             },
             Change::TaskDue(Some(jiff::civil::date(2026, 12, 1))),
             Change::TaskDue(None),
+            Change::TabMove(crate::model::RemoteMove {
+                id: Uuid::now_v7(),
+                remote: "rsync:box:x".into(),
+                by: "alice".into(),
+            }),
             Change::TabMember {
                 recipient: "age1xyz".into(),
                 name: Some("bob".into()),

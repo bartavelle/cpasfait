@@ -78,6 +78,20 @@ Keys:
 - Passphrase-protected identities and age plugins (YubiKey…) are not
   supported yet.
 
+### Moving a shared tab to another remote
+
+```
+:tabmove rsync:me@newbox:cpasfait     # copies everything there, then switches to it
+```
+
+The move is announced to the other members through the old remote: their tab
+shows `⇅↪` and a message. `:tabaccept` opens the command line with the new
+remote filled in: press Enter to follow it as is, or edit it first (the same
+place may have another path on their machine, or need their own SSH login).
+Changes made on the old remote in the meantime are carried over when they
+follow. A path where the tab cannot be found is refused. Once everyone has
+followed, the old remote can be deleted.
+
 ### Sharing through rsync over SSH
 
 Any machine you can `ssh` into and that has `rsync` (a VPS, a NAS, a

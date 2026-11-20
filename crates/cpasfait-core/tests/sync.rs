@@ -366,3 +366,139 @@ fn ops_in_other_tabs_do_not_create_gaps() {
     assert_eq!(d1.sync(tab, &backend).unwrap().pulled, 2);
     assert_eq!(d1.repo.tree(tab).unwrap().len(), 1);
 }
+
+fn local(p: &Path) -> cpasfait_core::RemoteConfig {
+    cpasfait_core::RemoteConfig::LocalDir {
+        path: p.to_str().unwrap().to_owned(),
+    }
+}
+
+/// Alice and Bob share a tab through `old`; Bob has synced.
+fn pair(old: &dyn RemoteBackend, old_path: &Path) -> (Dev, Dev, TabId) {
+    let (mut a, mut b) = (Dev::new("alice"), Dev::new("bob"));
+    let tab = a.repo.create_tab("shared").unwrap();
+    a.repo.share_tab(tab, a.id.recipient()).unwrap();
+    a.repo.set_remote(tab, Some(&local(old_path))).unwrap();
+    a.invite(tab, &b);
+    a.sync(tab, old).unwrap();
+    b.repo.add_known_tab(tab).unwrap();
+    b.repo.set_remote(tab, Some(&local(old_path))).unwrap();
+    b.sync(tab, old).unwrap();
+    (a, b, tab)
+}
+
+#[test]
+fn moving_to_another_remote() {
+    use cpasfait_core::sync::{accept_move, move_tab};
+    let dir = tempfile::tempdir().unwrap();
+    let (p1, p2) = (dir.path().join("one"), dir.path().join("two"));
+    let (old, new) = (LocalDir::new(&p1), LocalDir::new(&p2));
+    let (mut a, mut b, tab) = pair(&old, &p1);
+    let mut c = Dev::new("carol");
+    a.invite(tab, &c);
+    let t = a.repo.add_task(tab, Place::LastChildOf(None), "before").unwrap();
+    a.sync(tab, &old).unwrap();
+    c.repo.add_known_tab(tab).unwrap();
+    c.sync(tab, &old).unwrap();
+
+    let copied = move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id).unwrap();
+    assert!(copied >= 4, "{copied}");
+    let tabs = a.repo.tabs().unwrap();
+    assert_eq!(tabs[0].remote, Some(local(&p2)));
+    assert_eq!(tabs[0].pending_move, None, "the mover follows its own move");
+
+    // Bob, not having seen it yet, writes to the old remote after the copy.
+    let late = b.repo.add_task(tab, Place::LastChildOf(None), "late").unwrap();
+    b.sync(tab, &old).unwrap();
+    let m = b.repo.tabs().unwrap()[0].pending_move.clone().unwrap();
+    assert_eq!((m.by.as_str(), m.remote.as_str()), ("alice", p2.to_str().unwrap()));
+    // He follows it as is; his late change comes along.
+    let r = accept_move(&mut b.repo, tab, Some(&old), &new, &local(&p2), &b.id).unwrap();
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert!(r.copied >= 1);
+    assert_eq!(b.repo.tabs().unwrap()[0].remote, Some(local(&p2)));
+    assert_eq!(b.repo.tabs().unwrap()[0].pending_move, None);
+
+    // Carol sees the same place under another path.
+    let link = dir.path().join("two-elsewhere");
+    std::os::unix::fs::symlink(&p2, &link).unwrap();
+    c.sync(tab, &old).unwrap();
+    let elsewhere = LocalDir::new(&link);
+    accept_move(&mut c.repo, tab, Some(&old), &elsewhere, &local(&link), &c.id).unwrap();
+    c.repo.set_title(t, "after").unwrap();
+    c.sync(tab, &elsewhere).unwrap();
+
+    a.sync(tab, &new).unwrap();
+    b.sync(tab, &new).unwrap();
+    assert_eq!(a.title(late).as_deref(), Some("late"));
+    assert_eq!(b.title(t).as_deref(), Some("after"));
+    assert_eq!(a.repo.dump_model().unwrap(), b.repo.dump_model().unwrap());
+    assert_eq!(a.repo.dump_model().unwrap(), c.repo.dump_model().unwrap());
+}
+
+#[test]
+fn following_a_move_to_a_wrong_path_is_refused() {
+    use cpasfait_core::sync::{accept_move, move_tab};
+    let dir = tempfile::tempdir().unwrap();
+    let (p1, p2, typo) = (dir.path().join("one"), dir.path().join("two"), dir.path().join("tow"));
+    let (old, new) = (LocalDir::new(&p1), LocalDir::new(&p2));
+    let (mut a, mut b, tab) = pair(&old, &p1);
+    move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id).unwrap();
+    b.sync(tab, &old).unwrap();
+    let wrong = LocalDir::new(&typo);
+    assert!(accept_move(&mut b.repo, tab, Some(&old), &wrong, &local(&typo), &b.id).is_err());
+    assert!(!typo.exists(), "nothing written there");
+    let t = &b.repo.tabs().unwrap()[0];
+    assert_eq!(t.remote, Some(local(&p1)));
+    assert!(t.pending_move.is_some());
+    // no move pending: nothing to accept
+    assert!(accept_move(&mut a.repo, tab, None, &new, &local(&p2), &a.id).is_err());
+}
+
+#[test]
+fn old_remote_lost_after_a_move() {
+    use cpasfait_core::sync::{accept_move, move_tab};
+    let dir = tempfile::tempdir().unwrap();
+    let (p1, p2) = (dir.path().join("one"), dir.path().join("two"));
+    let (old, new) = (LocalDir::new(&p1), LocalDir::new(&p2));
+    let (mut a, mut b, tab) = pair(&old, &p1);
+    move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id).unwrap();
+    let late = b.repo.add_task(tab, Place::LastChildOf(None), "late").unwrap();
+    b.sync(tab, &old).unwrap();
+    std::fs::remove_dir_all(&p1).unwrap();
+    // Bob's late ops never reached the new remote by copy: he uploads them again.
+    let r = accept_move(&mut b.repo, tab, Some(&old), &new, &local(&p2), &b.id).unwrap();
+    assert_eq!(r.copied, 0);
+    a.sync(tab, &new).unwrap();
+    assert_eq!(a.title(late).as_deref(), Some("late"));
+}
+
+#[test]
+fn lost_segments_are_uploaded_again() {
+    let remote = tempfile::tempdir().unwrap();
+    let backend = LocalDir::new(remote.path());
+    let (mut a, mut b, tab) = pair(&backend, remote.path());
+    let t = a.repo.add_task(tab, Place::LastChildOf(None), "x").unwrap();
+    a.sync(tab, &backend).unwrap();
+    // Alice's first segment disappears from the remote.
+    let dir = remote
+        .path()
+        .join(tab.to_string())
+        .join("ops")
+        .join(a.repo.device().to_string());
+    let first = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .min()
+        .unwrap();
+    std::fs::remove_file(first).unwrap();
+    let mut c = Dev::new("carol");
+    a.invite(tab, &c);
+    assert!(a.sync(tab, &backend).unwrap().republished > 0);
+    c.repo.add_known_tab(tab).unwrap();
+    c.sync(tab, &backend).unwrap();
+    assert_eq!(c.title(t).as_deref(), Some("x"));
+    // overlapping segments are harmless for those who had them
+    assert_eq!(b.sync(tab, &backend).unwrap().pulled, 3);
+    assert_eq!(b.repo.dump_model().unwrap(), c.repo.dump_model().unwrap());
+}

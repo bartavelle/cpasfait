@@ -224,7 +224,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
     };
     {
         let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; PRAGMA user_version = 1;")
+        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; PRAGMA user_version = 1;")
             .unwrap();
     }
     // The read-only open used by the companion tools migrates too.

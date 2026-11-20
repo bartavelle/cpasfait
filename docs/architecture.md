@@ -162,6 +162,10 @@ Known limitations / next steps:
   (Android would need a native SFTP backend against the same directory). Tested with a fake `ssh`, not a real server.
 - WebDAV backend still to do. `RemoteBackend` is the extension point.
 - No compaction of op logs yet.
-- A segment that never arrives (for example, deleted on the remote) blocks that device's later ops for that tab.
+- A segment that never arrives (for example, deleted on the remote) blocks that device's later ops for that tab, until
+  that device syncs again (it uploads its missing ops again).
+- `:tabmove` / `:tabaccept` run in the UI thread: a long copy (many files on Drive) freezes the TUI meanwhile.
+- Concurrent moves: the last one wins, but a device that already moved elsewhere does not see a move announced on
+  the old remote.
 - Keymap and colors are hard-coded (`keymap.rs`).
 - The first run auto-creates an `inbox` tab, so a device that only joins shared tabs also has an empty local one.

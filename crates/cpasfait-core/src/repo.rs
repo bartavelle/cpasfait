@@ -4,7 +4,7 @@ use crate::apply::{apply_op, apply_to_model};
 use crate::error::{Error, Result};
 use crate::hlc::{ClockState, Hlc};
 use crate::ids::{DeviceId, SessionId, TabId, TaskId};
-use crate::model::{DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, Session, TabInfo, Task};
+use crate::model::{DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, Task};
 use crate::op::{Change, Entity, Op, Status};
 use crate::position::key_between;
 use crate::schema;
@@ -419,6 +419,50 @@ impl Repo {
                 depth: 0,
             },
         )
+    }
+
+    /// Record a move of the tab to `remote` (a spec), already followed by this device.
+    pub fn propose_move(&mut self, tab: TabId, remote: &str) -> Result<Uuid> {
+        let m = RemoteMove {
+            id: Uuid::now_v7(),
+            remote: remote.to_owned(),
+            by: self.user.clone(),
+        };
+        let id = m.id;
+        self.edit1(tab, tab, Change::TabMove(m))?;
+        self.mark_move_done(tab, id)?;
+        Ok(id)
+    }
+
+    /// This device followed (or chose not to follow) move `id`.
+    pub fn mark_move_done(&mut self, tab: TabId, id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tab SET move_done = ?2 WHERE id = ?1",
+            params![tab.to_string(), id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Ops of this device in `tab` with `from <= seq <= to`, in seq order.
+    pub(crate) fn own_ops(&self, tab: TabId, from: u64, to: u64) -> Result<Vec<Op>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {OP_COLS} FROM op WHERE tab = ?1 AND device = ?2 AND seq BETWEEN ?3 AND ?4 ORDER BY seq"
+        ))?;
+        let rows = st.query_map(
+            params![tab.to_string(), self.device.to_string(), from as i64, to as i64],
+            op_from_row,
+        )?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Highest seq of this device's ops in `tab` already pushed (0 if none).
+    pub(crate) fn last_pushed(&self, tab: TabId) -> Result<u64> {
+        let n: Option<i64> = self.conn.query_row(
+            "SELECT max(seq) FROM op WHERE tab = ?1 AND device = ?2 AND pushed = 1",
+            params![tab.to_string(), self.device.to_string()],
+            |r| r.get(0),
+        )?;
+        Ok(n.unwrap_or(0) as u64)
     }
 
     /// Remote key files already examined, by path.
@@ -967,15 +1011,27 @@ impl Repo {
     // ---------------------------------------------------------------- reads
 
     pub fn tabs(&self) -> Result<Vec<TabInfo>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT id, name, remote FROM tab WHERE deleted = 0 ORDER BY id")?;
+        let mut st = self.conn.prepare(
+            "SELECT id, name, remote, move_id, move_remote, move_by, move_done
+             FROM tab WHERE deleted = 0 ORDER BY id",
+        )?;
         let rows = st.query_map([], |r| {
             let remote: Option<String> = r.get(2)?;
+            let move_id: Option<String> = r.get(3)?;
+            let done: Option<String> = r.get(6)?;
+            let pending_move = match move_id {
+                Some(id) if Some(&id) != done.as_ref() => Some(RemoteMove {
+                    id: parse_id(&id)?,
+                    remote: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    by: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                }),
+                _ => None,
+            };
             Ok(TabInfo {
                 id: parse_id(&r.get::<_, String>(0)?)?,
                 name: r.get(1)?,
                 remote: remote.and_then(|s| serde_json::from_str(&s).ok()),
+                pending_move,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1135,7 +1191,7 @@ impl Repo {
         tx.execute_batch(
             "DELETE FROM field_hlc; DELETE FROM task; DELETE FROM task_tag; DELETE FROM task_dep; DELETE FROM session;
              DELETE FROM tab_member;
-             UPDATE tab SET name = '', deleted = 0;",
+             UPDATE tab SET name = '', deleted = 0, move_id = NULL, move_remote = NULL, move_by = NULL;",
         )?;
         for op in &ops {
             apply_to_model(&tx, op)?;
@@ -1148,7 +1204,10 @@ impl Repo {
     pub fn dump_model(&self) -> Result<String> {
         let mut out = String::new();
         for (q, n) in [
-            ("SELECT id, name, deleted FROM tab ORDER BY id", 3),
+            (
+                "SELECT id, name, deleted, move_id, move_remote, move_by FROM tab ORDER BY id",
+                6,
+            ),
             (
                 "SELECT id, tab, title, notes, status, priority, due, parent, position, deleted FROM task ORDER BY id",
                 10,

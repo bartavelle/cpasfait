@@ -162,4 +162,5 @@ Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               REMOTE = a directory, gdrive:FOLDER-ID, or rsync:[user@]host:path
 Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME
               :tabmembers   (remote data is encrypted to the members' age/SSH keys)
+              :tabmove REMOTE  move it for everyone   :tabaccept  follow a move (⇅↪)
 Press any key to close this help.";

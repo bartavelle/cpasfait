@@ -39,6 +39,7 @@ are ordered after them.
 |---|---|---|
 | `tab.name` | string | |
 | `tab.deleted` | bool | tombstone |
+| `tab.move` | `{"id": uuid, "remote": spec, "by": name}` | the tab's data was moved to another remote (spec as typed in `:tabremote`) |
 | `tab.member:<public key>` | string \| `false` | a member of a shared tab and their display name; `false` once removed. The key is an age X25519 recipient (`age1…`) or an SSH public key without comment (`ssh-ed25519 AAAA…`) |
 | `task.title` | string | |
 | `task.notes` | string | free text |
@@ -110,6 +111,31 @@ work on a task closes the device's open session(s) first.
 
 Joining a shared tab = knowing the remote root plus the tab id, having been
 invited (a key file encrypted to you), then pulling.
+
+A device whose own segments are missing from the remote (a lost file, a new
+remote) uploads its ops again from the end of its unbroken run of segments:
+`<end+1>-<last pushed>`. Segments of a device may thus overlap; readers ingest
+any segment that starts at or before `cursor + 1` and skip ops they have.
+
+### Moving to another remote
+
+1. The mover records a `tab.move` op and syncs it to the old remote.
+2. It copies every file of the tab that the new remote lacks, unchanged
+   (files are only bound to their path relative to the root, so they stay
+   valid).
+3. It switches to the new remote.
+
+Other devices see the op on the old remote. To follow, a device:
+- checks that the new remote (as given, or edited for this machine) already
+  has key files of the tab;
+- copies from the old remote whatever the new one lacks (files written there
+  after the mover's copy);
+- switches to the new remote.
+
+Nothing is written to the old remote any more. If the old remote is gone,
+devices upload their own missing ops again (see above). Locally, each device
+remembers the id of the last move it made or followed; a newer `tab.move` is
+pending until it follows it.
 
 ## Encryption
 

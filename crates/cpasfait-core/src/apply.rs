@@ -85,6 +85,13 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
     match change {
         TabName(s) => set!(ensure_tab, "tab", "name", s),
         TabDeleted(b) => set!(ensure_tab, "tab", "deleted", b),
+        TabMove(m) => {
+            ensure_tab()?;
+            conn.execute(
+                "UPDATE tab SET move_id = ?2, move_remote = ?3, move_by = ?4 WHERE id = ?1",
+                params![entity, m.id.to_string(), m.remote, m.by],
+            )?;
+        }
         TabMember { recipient, name } => {
             ensure_tab()?;
             conn.execute(

@@ -76,6 +76,8 @@ pub struct App {
     pub sync_status: Option<String>,
     /// This user's secret key, loaded (or created) on first need.
     pub identity: Option<Identity>,
+    /// Remote moves already announced in the message line.
+    notified_moves: HashSet<String>,
     pub requests: Vec<Request>,
     pub quit: bool,
     deleted_stack: Vec<TaskId>,
@@ -112,6 +114,7 @@ impl App {
             next: None,
             sync_status: None,
             identity: None,
+            notified_moves: HashSet::new(),
             requests: vec![],
             quit: false,
             deleted_stack: vec![],
@@ -192,6 +195,14 @@ impl App {
             self.tab_idx = i;
         }
         self.tab_idx = self.tab_idx.min(self.tabs.len().saturating_sub(1));
+        if let Some(m) = self.tab().and_then(|t| t.pending_move.clone())
+            && self.notified_moves.insert(m.id.to_string())
+        {
+            self.info(format!(
+                "{} moved this tab to {}: :tabaccept to follow (you can edit the remote first)",
+                m.by, m.remote
+            ));
+        }
         match self.tab().map(|t| t.id) {
             Some(tab) => {
                 self.tree = self.repo.tree(tab)?;
@@ -896,12 +907,75 @@ impl App {
                     self.tab_idx = i;
                     self.switch_tab()?;
                 }
+                // Joined where a move pointed to: nothing left to follow.
+                if let Some(m) = self.tab().and_then(|t| t.pending_move.clone())
+                    && m.remote == config.spec()
+                {
+                    self.repo.mark_move_done(tab, m.id)?;
+                    self.refresh()?;
+                }
                 match res {
                     Ok(_) => self.info("joined"),
                     Err(cpasfait_core::Error::NotInvited(key)) => self.info(format!(
                         "joined, waiting for an invitation: ask a member to run :tabinvite {key}"
                     )),
                     Err(e) => return Err(e.into()),
+                }
+            }
+            "tabmove" => {
+                let tab = self.tab_id()?;
+                let old = self
+                    .tab()
+                    .and_then(|t| t.remote.clone())
+                    .ok_or_else(|| anyhow!("this tab has no remote: use :tabremote"))?;
+                if arg.is_empty() {
+                    bail!("usage: :tabmove REMOTE (moves the shared data there, for everyone)");
+                }
+                let config = parse_remote(arg)?;
+                if config == old {
+                    bail!("already there");
+                }
+                self.ensure_identity()?;
+                let (from, to) = (backend::open(&old)?, backend::open(&config)?);
+                let me = self.identity.as_ref().expect("loaded");
+                let n = cpasfait_core::sync::move_tab(&mut self.repo, tab, from.as_ref(), to.as_ref(), &config, me)?;
+                self.refresh()?;
+                self.info(format!(
+                    "moved to {} ({n} files copied); the other members are asked to follow. The old remote can be \
+                     deleted once they have",
+                    config.spec()
+                ));
+            }
+            "tabaccept" => {
+                let tab = self.tab_id()?;
+                let pending = self
+                    .tab()
+                    .and_then(|t| t.pending_move.clone())
+                    .ok_or_else(|| anyhow!("no remote move to follow for this tab"))?;
+                if arg.is_empty() {
+                    // Let the user check or edit where it is on this machine.
+                    self.mode = Mode::Command(LineEditor::new(&format!("tabaccept {}", pending.remote)));
+                    return Ok(());
+                }
+                let config = parse_remote(arg)?;
+                self.ensure_identity()?;
+                let old = self
+                    .tab()
+                    .and_then(|t| t.remote.clone())
+                    .and_then(|r| backend::open(&r).ok());
+                let new = backend::open(&config)?;
+                let me = self.identity.as_ref().expect("loaded");
+                let r =
+                    cpasfait_core::sync::accept_move(&mut self.repo, tab, old.as_deref(), new.as_ref(), &config, me)?;
+                self.refresh()?;
+                let mut msg = format!("now using {}", config.spec());
+                if r.copied > 0 {
+                    msg.push_str(&format!(" ({} late files copied)", r.copied));
+                }
+                if r.warnings.is_empty() {
+                    self.info(msg);
+                } else {
+                    self.error(format!("{msg}; {}", r.warnings.join("; ")));
                 }
             }
             "tabinvite" => {
@@ -922,7 +996,7 @@ impl App {
                 self.requests.push(Request::Sync);
                 let remote = self.tab().and_then(|t| t.remote.clone());
                 self.info(match remote {
-                    Some(r) => format!("invited {name}: they can now run :tabjoin {} {tab}", remote_spec(&r)),
+                    Some(r) => format!("invited {name}: they can now run :tabjoin {} {tab}", r.spec()),
                     None => format!("invited {name}"),
                 });
             }
@@ -1025,14 +1099,6 @@ pub fn short_key(key: &str) -> String {
         Some((kind, b64)) => format!("{kind} …{}", &b64[b64.len().saturating_sub(8)..]),
         None if key.len() > 16 => format!("{}…{}", &key[..8], &key[key.len() - 4..]),
         None => key.to_owned(),
-    }
-}
-
-/// A remote as typed in `:tabjoin`.
-fn remote_spec(r: &RemoteConfig) -> String {
-    match r {
-        RemoteConfig::LocalDir { path } => path.clone(),
-        RemoteConfig::GDrive { .. } | RemoteConfig::Rsync { .. } => r.to_string(),
     }
 }
 

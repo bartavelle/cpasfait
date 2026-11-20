@@ -23,7 +23,7 @@ use crate::crypto::{self, Identity, Key};
 use crate::error::{Error, Result};
 use crate::hlc::Hlc;
 use crate::ids::{DeviceId, TabId};
-use crate::model::Epoch;
+use crate::model::{Epoch, RemoteConfig};
 use crate::op::Op;
 use crate::repo::Repo;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,9 @@ pub struct SyncStats {
     pub waiting_for_key: usize,
     /// Key files uploaded (new members, new epochs).
     pub keys_sent: usize,
+    /// Ops of this device uploaded again because the remote lacked them
+    /// (a new remote, a lost file).
+    pub republished: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -386,8 +389,17 @@ fn distribute_keys(
 
 // ------------------------------------------------------------------- ops
 
-/// Fetch new ops of other devices. Returns (new ops, devices waiting for a key).
-fn pull(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend) -> Result<(usize, usize)> {
+/// What [`pull`] saw.
+struct Pulled {
+    new: usize,
+    /// Devices waiting for a key.
+    waiting: usize,
+    /// This device's ops on the remote are those up to this seq, without gap.
+    own_end: u64,
+}
+
+/// Fetch new ops of other devices.
+fn pull(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend) -> Result<Pulled> {
     let keys: HashMap<Uuid, Key> = repo.epochs(tab)?.into_iter().map(|e| (e.id, e.key)).collect();
     let mut per_device: BTreeMap<DeviceId, BTreeSet<Segment>> = BTreeMap::new();
     for path in backend.list(&format!("{tab}/ops"))? {
@@ -396,6 +408,13 @@ fn pull(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend) -> Result<(usi
         }
     }
     let (mut new, mut waiting) = (0, 0);
+    let mut own_end = 0;
+    for seg in per_device.get(&repo.device()).into_iter().flatten() {
+        if seg.first > own_end + 1 {
+            break;
+        }
+        own_end = own_end.max(seg.last);
+    }
     for (device, segments) in per_device {
         let mut cursor = repo.cursor(tab, device)?;
         for seg in segments {
@@ -421,26 +440,46 @@ fn pull(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend) -> Result<(usi
             repo.set_cursor(tab, device, cursor)?;
         }
     }
-    Ok((new, waiting))
+    Ok(Pulled { new, waiting, own_end })
+}
+
+/// Seal and upload ops of this device as one segment.
+fn upload(repo: &Repo, tab: TabId, backend: &dyn RemoteBackend, me: &Identity, ops: &[Op]) -> Result<()> {
+    let (Some(first), Some(last)) = (ops.first(), ops.last()) else {
+        return Ok(());
+    };
+    let epoch = repo
+        .write_epoch(tab)?
+        .ok_or_else(|| Error::NotInvited(me.recipient().to_owned()))?;
+    let path = format!("{tab}/ops/{}/{}", repo.device(), segment_name(first.seq, last.seq));
+    let data = crypto::seal(&epoch.key, epoch.id, &path, &encode_ops(ops)?);
+    match backend.put_new(&path, &data) {
+        // Already there: an earlier push succeeded but was not recorded.
+        Ok(()) | Err(Error::AlreadyExists(_)) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Upload again this device's ops the remote lacks (after `own_end`), so
+/// that readers are not stuck on a gap. Segments may overlap: readers skip
+/// what they already have.
+fn republish(repo: &Repo, tab: TabId, backend: &dyn RemoteBackend, me: &Identity, own_end: u64) -> Result<usize> {
+    let last = repo.last_pushed(tab)?;
+    if own_end >= last {
+        return Ok(0);
+    }
+    let ops = repo.own_ops(tab, own_end + 1, last)?;
+    upload(repo, tab, backend, me, &ops)?;
+    Ok(ops.len())
 }
 
 /// Upload this device's unpushed ops as one new segment.
 fn push(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend, me: &Identity) -> Result<usize> {
     let ops = repo.unpushed_ops(tab)?;
-    let (Some(first), Some(last)) = (ops.first(), ops.last()) else {
+    let Some(last) = ops.last().map(|o| o.seq) else {
         return Ok(0);
     };
-    let epoch = repo
-        .write_epoch(tab)?
-        .ok_or_else(|| Error::NotInvited(me.recipient().to_owned()))?;
-    let (first, last) = (first.seq, last.seq);
-    let path = format!("{tab}/ops/{}/{}", repo.device(), segment_name(first, last));
-    let data = crypto::seal(&epoch.key, epoch.id, &path, &encode_ops(&ops)?);
-    match backend.put_new(&path, &data) {
-        // Already there: an earlier push succeeded but was not recorded.
-        Ok(()) | Err(Error::AlreadyExists(_)) => {}
-        Err(e) => return Err(e),
-    }
+    upload(repo, tab, backend, me, &ops)?;
     repo.mark_pushed(tab, last)?;
     let device = repo.device();
     repo.set_cursor(tab, device, last)?;
@@ -455,16 +494,122 @@ pub fn sync_tab(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend, me: &I
     if repo.epochs(tab)?.is_empty() {
         return Err(Error::NotInvited(me.recipient().to_owned()));
     }
-    let (pulled, waiting_for_key) = pull(repo, tab, backend)?;
+    let p = pull(repo, tab, backend)?;
     // After pulling: membership changes received are acted upon right away.
     let keys_sent = distribute_keys(repo, tab, backend, me, &mut cov)?;
+    let republished = republish(repo, tab, backend, me, p.own_end)?;
     let pushed = push(repo, tab, backend, me)?;
     Ok(SyncStats {
-        pulled,
+        pulled: p.new,
         pushed,
-        waiting_for_key,
+        waiting_for_key: p.waiting,
         keys_sent,
+        republished,
     })
+}
+
+// ----------------------------------------------------------------- moves
+
+/// Copy every file of `tab` that `to` lacks from `from` (files are
+/// immutable, and encrypted for their path: they are valid as they are).
+/// Returns the number of files copied.
+pub fn copy_tab(tab: TabId, from: &dyn RemoteBackend, to: &dyn RemoteBackend) -> Result<usize> {
+    let ours = |p: &str| parse_key_path(tab, p).is_some() || parse_segment_path(tab, p).is_some();
+    let have: HashSet<String> = to.list(&tab.to_string())?.into_iter().collect();
+    let mut copied = 0;
+    for path in from.list(&tab.to_string())? {
+        if !ours(&path) || have.contains(&path) {
+            continue;
+        }
+        match to.put_new(&path, &from.get(&path)?) {
+            Ok(()) => copied += 1,
+            Err(Error::AlreadyExists(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(copied)
+}
+
+/// Move a shared tab from `old` to `new` (`new_remote`):
+/// 1. record the move (a `tab.move` op) and sync it to the old remote, where
+///    the other members will see it;
+/// 2. copy all the tab's files to the new remote;
+/// 3. switch this device to the new remote, and sync there.
+///
+/// Returns the number of files copied. Until step 3, this device still uses
+/// the old remote, so a failure can simply be retried.
+pub fn move_tab(
+    repo: &mut Repo,
+    tab: TabId,
+    old: &dyn RemoteBackend,
+    new: &dyn RemoteBackend,
+    new_remote: &RemoteConfig,
+    me: &Identity,
+) -> Result<usize> {
+    if repo.epochs(tab)?.is_empty() {
+        return Err(Error::Invalid("this tab is not shared".into()));
+    }
+    repo.propose_move(tab, &new_remote.spec())?;
+    sync_tab(repo, tab, old, me)?;
+    let copied = copy_tab(tab, old, new)?;
+    repo.set_remote(tab, Some(new_remote))?;
+    sync_tab(repo, tab, new, me)?;
+    Ok(copied)
+}
+
+#[derive(Debug, Default)]
+pub struct AcceptReport {
+    /// Files copied from the old remote (written there after the move).
+    pub copied: usize,
+    /// Non-fatal problems (the old remote being unreachable, ...).
+    pub warnings: Vec<String>,
+}
+
+/// Follow a move made by another member: to the remote they gave, or to
+/// another spec of the same place (a local path differs between machines).
+///
+/// What was written on the old remote after the mover's copy is copied too
+/// (best effort: if `old` is unreachable, each device uploads again its own
+/// missing ops at its next sync anyway). Refuses a new remote that has nothing
+/// of the tab yet: a wrong path, or a move still in progress.
+pub fn accept_move(
+    repo: &mut Repo,
+    tab: TabId,
+    old: Option<&dyn RemoteBackend>,
+    new: &dyn RemoteBackend,
+    new_remote: &RemoteConfig,
+    me: &Identity,
+) -> Result<AcceptReport> {
+    let pending = repo
+        .tabs()?
+        .into_iter()
+        .find(|t| t.id == tab)
+        .and_then(|t| t.pending_move)
+        .ok_or_else(|| Error::NotFound("no move to follow for this tab".into()))?;
+    let present = new
+        .list(&key_dir(tab))?
+        .iter()
+        .any(|p| parse_key_path(tab, p).is_some());
+    if !present {
+        return Err(Error::NotFound(format!(
+            "nothing of this tab at {} (yet): wrong path, or the move is still in progress",
+            new_remote.spec()
+        )));
+    }
+    let mut report = AcceptReport::default();
+    // Nothing is written to the old remote: unpushed ops go to the new one.
+    if let Some(old) = old {
+        match copy_tab(tab, old, new) {
+            Ok(n) => report.copied = n,
+            Err(e) => report.warnings.push(format!("copying from the old remote: {e}")),
+        }
+    }
+    repo.set_remote(tab, Some(new_remote))?;
+    repo.mark_move_done(tab, pending.id)?;
+    if let Err(e) = sync_tab(repo, tab, new, me) {
+        report.warnings.push(format!("new remote: {e}"));
+    }
+    Ok(report)
 }
 
 /// Sync every tab that has a remote configured, with the default identity.

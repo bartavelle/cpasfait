@@ -532,3 +532,60 @@ fn key_arguments() {
         "ssh-ed25519 …AAAAIHsK"
     );
 }
+
+#[test]
+fn moving_a_tab_between_remotes() {
+    use cpasfait_core::backend::localdir::LocalDir;
+    use cpasfait_core::sync::sync_tab;
+    let tmp = tempfile::tempdir().unwrap();
+    let (one, two) = (tmp.path().join("one"), tmp.path().join("two"));
+    let (mut alice, _) = app();
+    let (mut bob, _) = app();
+    press(&mut alice, "oPaint<enter>");
+    press(&mut alice, &format!(":tabremote {}<enter>", one.display()));
+    let bob_key = bob.identity.as_ref().unwrap().recipient().to_owned();
+    press(&mut alice, &format!(":tabinvite {bob_key} bob<enter>"));
+    let tab = alice.tabs[alice.tab_idx].id;
+    sync_tab(
+        &mut alice.repo,
+        tab,
+        &LocalDir::new(&one),
+        alice.identity.as_ref().unwrap(),
+    )
+    .unwrap();
+    press(&mut bob, &format!(":tabjoin {}<enter>", one.display()));
+    assert_eq!(message(&bob), "joined");
+
+    press(&mut bob, ":tabaccept<enter>");
+    assert!(message(&bob).contains("no remote move"), "{}", message(&bob));
+    press(&mut alice, &format!(":tabmove {}<enter>", one.display()));
+    assert!(message(&alice).contains("already there"));
+    press(&mut alice, &format!(":tabmove {}<enter>", two.display()));
+    assert!(message(&alice).starts_with("moved to "), "{}", message(&alice));
+    assert!(two.join(tab.to_string()).join("keys").is_dir());
+
+    // Bob hears about it from the old remote.
+    sync_tab(&mut bob.repo, tab, &LocalDir::new(&one), bob.identity.as_ref().unwrap()).unwrap();
+    bob.refresh().unwrap();
+    assert_eq!(
+        message(&bob),
+        format!(
+            "alice moved this tab to {}: :tabaccept to follow (you can edit the remote first)",
+            two.display()
+        )
+    );
+    assert!(screen(&mut bob, 80, 5).contains("inbox ⇅↪"));
+    press(&mut bob, ":tabaccept<enter>");
+    let Mode::Command(e) = &bob.mode else { panic!() };
+    assert_eq!(e.text(), format!("tabaccept {}", two.display()));
+    press(&mut bob, "<enter>");
+    assert_eq!(message(&bob), format!("now using {}", two.display()));
+    assert!(!screen(&mut bob, 80, 5).contains('↪'));
+    assert_eq!(
+        bob.tab().unwrap().remote,
+        Some(cpasfait_core::RemoteConfig::LocalDir {
+            path: two.display().to_string()
+        })
+    );
+    assert_eq!(titles(&bob), vec!["Paint"]);
+}

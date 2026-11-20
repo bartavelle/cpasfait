@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -134,6 +134,15 @@ CREATE TABLE key_file(
 ) WITHOUT ROWID;
 "#;
 
+/// Moves to another remote: the latest move (read model), and the move this
+/// device followed or made (local).
+const SCHEMA_V5: &str = "
+ALTER TABLE tab ADD COLUMN move_id TEXT;
+ALTER TABLE tab ADD COLUMN move_remote TEXT;
+ALTER TABLE tab ADD COLUMN move_by TEXT;
+ALTER TABLE tab ADD COLUMN move_done TEXT;
+";
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -153,6 +162,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 4 {
         tx.execute_batch(SCHEMA_V4)?;
+    }
+    if version < 5 {
+        tx.execute_batch(SCHEMA_V5)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

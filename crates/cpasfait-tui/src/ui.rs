@@ -47,7 +47,12 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
     let mut spans = vec![];
     for (i, t) in app.tabs.iter().enumerate() {
         let name = if t.name.is_empty() { "(unnamed)" } else { &t.name };
-        let label = format!(" {}:{}{} ", i + 1, name, if t.remote.is_some() { " ⇅" } else { "" });
+        let marks = match (&t.remote, &t.pending_move) {
+            (_, Some(_)) => " ⇅↪", // moved elsewhere: :tabaccept
+            (Some(_), None) => " ⇅",
+            (None, None) => "",
+        };
+        let label = format!(" {}:{}{marks} ", i + 1, name);
         let style = if i == app.tab_idx {
             Style::new().bg(Color::Blue).fg(Color::White).bold()
         } else {
