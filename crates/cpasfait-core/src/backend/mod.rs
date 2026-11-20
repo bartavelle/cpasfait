@@ -7,6 +7,7 @@
 #[cfg(feature = "gdrive")]
 pub mod gdrive;
 pub mod localdir;
+pub mod rsync;
 
 use crate::error::Result;
 use crate::model::RemoteConfig;
@@ -23,6 +24,10 @@ pub trait RemoteBackend: Send {
 pub fn open(config: &RemoteConfig) -> Result<Box<dyn RemoteBackend>> {
     match config {
         RemoteConfig::LocalDir { path } => Ok(Box::new(localdir::LocalDir::new(path))),
+        RemoteConfig::Rsync { target } => Ok(Box::new(rsync::Rsync::new(
+            target,
+            rsync::Rsync::default_mirror(target),
+        ))),
         #[cfg(feature = "gdrive")]
         RemoteConfig::GDrive { folder } => Ok(Box::new(gdrive::open(folder)?)),
         #[cfg(not(feature = "gdrive"))]

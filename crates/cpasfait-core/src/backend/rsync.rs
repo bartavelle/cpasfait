@@ -1,0 +1,260 @@
+//! rsync over SSH: the remote is a directory on any machine reachable with
+//! `ssh` and having `rsync` installed.
+//!
+//! Files on a remote are immutable and uniquely named, so a "copy what the
+//! other side is missing, never delete" rsync in each direction is a correct
+//! merge. This backend keeps a local mirror of the remote directory:
+//!
+//! - `list(prefix)` pulls the tab's directory into the mirror, then lists it;
+//! - `get` reads the mirror;
+//! - `put_new` writes into the mirror, then pushes that one file.
+//!
+//! The system's `rsync` and `ssh` are used, so `~/.ssh/config`, ssh-agent,
+//! hardware keys and `known_hosts` apply. ssh runs in batch mode (sync runs
+//! in the background, it cannot prompt): use ssh-agent or a key without a
+//! passphrase.
+
+use super::RemoteBackend;
+use super::localdir::LocalDir;
+use crate::error::{Error, Result};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// Default `-e` command for rsync.
+pub const SSH: &str = "ssh -o BatchMode=yes -o ConnectTimeout=20";
+
+/// A directory listed twice within this delay is not pulled again (a sync
+/// lists `<tab>/keys` then `<tab>/ops`: one pull of `<tab>` serves both).
+const PULL_REUSE: Duration = Duration::from_secs(2);
+
+pub struct Rsync {
+    /// rsync location of the remote root: `host:path`, `user@host:path`, or a local path.
+    remote: String,
+    mirror: LocalDir,
+    mirror_root: PathBuf,
+    ssh: String,
+    /// Top-level directories recently pulled.
+    pulled: Mutex<Vec<(String, Instant)>>,
+}
+
+impl Rsync {
+    pub fn new(remote: &str, mirror: impl Into<PathBuf>) -> Rsync {
+        let mirror_root = mirror.into();
+        // `host:~/x` is `host:x` (relative to the home directory), and the
+        // `~` would not survive quoting.
+        let remote = match remote.split_once(":~/") {
+            Some((host, path)) if !host.contains('/') => format!("{host}:{path}"),
+            _ => remote.to_owned(),
+        };
+        Rsync {
+            remote: remote.trim_end_matches('/').to_owned(),
+            mirror: LocalDir::new(&mirror_root),
+            mirror_root,
+            ssh: SSH.to_owned(),
+            pulled: Mutex::new(vec![]),
+        }
+    }
+
+    /// Use another remote shell than [`SSH`] (rsync's `-e`).
+    pub fn with_ssh(mut self, ssh: &str) -> Rsync {
+        self.ssh = ssh.to_owned();
+        self
+    }
+
+    /// The default mirror directory for a remote: `<data dir>/mirrors/<hash>`.
+    pub fn default_mirror(remote: &str) -> PathBuf {
+        use sha2::Digest;
+        let h = sha2::Sha256::digest(remote.as_bytes());
+        crate::paths::data_dir()
+            .join("mirrors")
+            .join(crate::crypto::hex(&h[..8]))
+    }
+
+    fn remote_path(&self, rel: &str) -> String {
+        if rel.is_empty() {
+            format!("{}/", self.remote)
+        } else {
+            format!("{}/{rel}", self.remote)
+        }
+    }
+
+    fn rsync(&self, args: &[&str], cwd: Option<&Path>) -> Result<()> {
+        let mut cmd = Command::new("rsync");
+        cmd.args(["-r", "--ignore-existing", "--timeout=60", "-e", &self.ssh])
+            .args(args)
+            .env("LC_ALL", "C")
+            .stdin(std::process::Stdio::null());
+        if let Some(d) = cwd {
+            cmd.current_dir(d);
+        }
+        let out = cmd.output().map_err(|e| {
+            Error::Backend(if e.kind() == std::io::ErrorKind::NotFound {
+                "rsync is not installed".into()
+            } else {
+                format!("running rsync: {e}")
+            })
+        })?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let msg: Vec<&str> = stderr
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with("rsync error:"))
+            .take(3)
+            .collect();
+        let msg = if msg.is_empty() {
+            stderr.trim().to_owned()
+        } else {
+            msg.join(" / ")
+        };
+        Err(Error::Backend(format!("rsync failed ({}): {msg}", out.status)))
+    }
+
+    /// Bring the remote directory `dir` (top-level, or "" for everything)
+    /// into the mirror, unless that was just done.
+    fn pull(&self, dir: &str) -> Result<()> {
+        {
+            let pulled = self.pulled.lock().expect("lock");
+            if pulled
+                .iter()
+                .any(|(d, t)| (d.is_empty() || d == dir) && t.elapsed() < PULL_REUSE)
+            {
+                return Ok(());
+            }
+        }
+        let local = self.mirror_root.join(dir);
+        std::fs::create_dir_all(&local)?;
+        let src = format!("{}/", self.remote_path(dir).trim_end_matches('/'));
+        let dst = format!("{}/", local.display());
+        match self.rsync(&[&src, &dst], None) {
+            Ok(()) => {}
+            // Nothing there yet.
+            Err(Error::Backend(m)) if m.contains("No such file or directory") => {}
+            Err(e) => return Err(e),
+        }
+        self.pulled.lock().expect("lock").push((dir.to_owned(), Instant::now()));
+        Ok(())
+    }
+
+    /// `(host, path)` when the remote is on another machine (rsync's rule: a
+    /// colon before any slash).
+    fn split_remote(&self) -> Option<(&str, &str)> {
+        let (host, path) = self.remote.split_once(':')?;
+        (!host.contains('/')).then_some((host, path))
+    }
+
+    /// Upload one mirror file (creating its directories on the remote).
+    fn push(&self, rel: &str) -> Result<()> {
+        // `-R` recreates the relative path under the destination, which must
+        // exist: create it first.
+        let mkdir;
+        let mut args = vec!["-R"];
+        match self.split_remote() {
+            Some((_, path)) => {
+                let path = if path.is_empty() { "." } else { path };
+                mkdir = format!("--rsync-path=mkdir -p '{}' && rsync", path.replace('\'', "'\\''"));
+                args.push(&mkdir);
+            }
+            None => std::fs::create_dir_all(&self.remote)?,
+        }
+        let dst = self.remote_path("");
+        args.extend([rel, dst.as_str()]);
+        self.rsync(&args, Some(&self.mirror_root))
+    }
+}
+
+fn top_dir(path: &str) -> &str {
+    path.split('/').find(|s| !s.is_empty()).unwrap_or("")
+}
+
+impl RemoteBackend for Rsync {
+    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        self.pull(top_dir(prefix))?;
+        self.mirror.list(prefix)
+    }
+
+    fn get(&self, path: &str) -> Result<Vec<u8>> {
+        match self.mirror.get(path) {
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.pull(top_dir(path))?;
+                self.mirror.get(path)
+            }
+            other => other,
+        }
+    }
+
+    fn put_new(&self, path: &str, data: &[u8]) -> Result<()> {
+        match self.mirror.put_new(path, data) {
+            Ok(()) => {
+                if let Err(e) = self.push(path) {
+                    // Not on the remote: don't let the mirror pretend it is.
+                    let _ = std::fs::remove_file(self.mirror_root.join(path));
+                    return Err(e);
+                }
+                Ok(())
+            }
+            Err(Error::AlreadyExists(p)) => {
+                // Maybe written by an earlier, interrupted run: make sure the
+                // remote has it.
+                self.push(path)?;
+                Err(Error::AlreadyExists(p))
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    pub(crate) fn have_rsync() -> bool {
+        Command::new("rsync").arg("--version").output().is_ok()
+    }
+
+    #[test]
+    fn remote_paths() {
+        let m = tempfile::tempdir().unwrap();
+        let r = |s: &str| Rsync::new(s, m.path()).remote;
+        assert_eq!(r("me@box:~/cpasfait/"), "me@box:cpasfait");
+        assert_eq!(r("box:/srv/x"), "box:/srv/x");
+        assert_eq!(r("/local/a:~/b"), "/local/a:~/b");
+        let b = Rsync::new("box:x", m.path());
+        assert_eq!(b.split_remote(), Some(("box", "x")));
+        assert_eq!(Rsync::new("/srv/a:b", m.path()).split_remote(), None);
+    }
+
+    #[test]
+    fn put_list_get_local_target() {
+        if !have_rsync() {
+            eprintln!("rsync not installed: skipped");
+            return;
+        }
+        let (remote, m1, m2) = (
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+        );
+        let root = remote.path().join("root");
+        let b1 = Rsync::new(root.to_str().unwrap(), m1.path());
+        let b2 = Rsync::new(root.to_str().unwrap(), m2.path());
+        assert_eq!(b1.list("t/ops").unwrap(), Vec::<String>::new());
+        b1.put_new("t/ops/d/1.seg", b"hello").unwrap();
+        assert_eq!(std::fs::read(root.join("t/ops/d/1.seg")).unwrap(), b"hello");
+        assert!(matches!(
+            b1.put_new("t/ops/d/1.seg", b"again"),
+            Err(Error::AlreadyExists(_))
+        ));
+        assert_eq!(b2.list("t/ops").unwrap(), vec!["t/ops/d/1.seg"]);
+        assert_eq!(b2.get("t/ops/d/1.seg").unwrap(), b"hello");
+        assert_eq!(b2.list("").unwrap(), vec!["t/ops/d/1.seg"]);
+        // a failed push leaves nothing behind in the mirror
+        let m3 = tempfile::tempdir().unwrap();
+        let bad = Rsync::new("/nonexistent/dir/root", m3.path());
+        assert!(bad.put_new("t/x", b"x").is_err());
+        assert!(bad.mirror.list("t").unwrap().is_empty());
+    }
+}

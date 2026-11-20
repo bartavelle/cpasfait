@@ -78,6 +78,26 @@ Keys:
 - Passphrase-protected identities and age plugins (YubiKey…) are not
   supported yet.
 
+### Sharing through rsync over SSH
+
+Any machine you can `ssh` into and that has `rsync` (a VPS, a NAS, a
+friend's server) can hold shared tabs; its owner cannot read them.
+
+```
+:tabremote rsync:me@box.example.org:cpasfait    # path relative to the home directory, or absolute
+:tabjoin rsync:friend@box.example.org:/srv/cpasfait/shared
+```
+
+- cpasfait runs the system's `rsync` and `ssh`, so `~/.ssh/config` (host
+  aliases, ports, jump hosts), ssh-agent and `known_hosts` all apply.
+- Sync runs in the background and cannot ask for a passphrase: load your key
+  into ssh-agent (or use one without a passphrase), and connect once by hand
+  so the host key is known.
+- Every member needs an account (or a shared one) with write access to the
+  directory.
+- A copy of the remote, encrypted, is kept in `<data dir>/mirrors/`; it can
+  be deleted at any time.
+
 ### Sharing through Google Drive
 
 cpasfait talks to the Drive API directly. It has no Google-verified app, so

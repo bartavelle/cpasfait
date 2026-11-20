@@ -169,6 +169,15 @@ after their removal. A removed member who keeps write access to the remote
 can still add segments under keys they had: removing their access to the
 remote itself is part of removing them.
 
+### rsync over SSH
+
+The root is a directory on an SSH host. Clients keep a local mirror and only
+run `rsync -r --ignore-existing` (never `--delete`): remote → mirror before
+listing, and a single file mirror → remote when creating it. rsync writes to a
+`.`-prefixed temporary file and renames it, so readers never see a partial
+file. Because files are immutable and uniquely named, this union of both sides
+is a correct merge, even with several clients at once.
+
 ### Google Drive
 
 The root is a Drive folder, named by its id (`gdrive:<folder-id>`). Each path

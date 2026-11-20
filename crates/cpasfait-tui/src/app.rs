@@ -827,7 +827,7 @@ impl App {
                         let r = self.tab().and_then(|t| t.remote.clone());
                         self.info(match r {
                             Some(r) => format!("remote: {r}"),
-                            None => "no remote (use :tabremote DIR|gdrive:FOLDER-ID)".into(),
+                            None => "no remote (use :tabremote DIR|gdrive:FOLDER-ID|rsync:HOST:PATH)".into(),
                         });
                     }
                     "none" => {
@@ -855,7 +855,7 @@ impl App {
                 let mut parts = arg.split_whitespace();
                 let dir = parts
                     .next()
-                    .ok_or_else(|| anyhow!("usage: :tabjoin DIR|gdrive:FOLDER-ID [TAB-ID]"))?;
+                    .ok_or_else(|| anyhow!("usage: :tabjoin DIR|gdrive:FOLDER-ID|rsync:HOST:PATH [TAB-ID]"))?;
                 let config = parse_remote(dir)?;
                 self.ensure_identity()?;
                 let b = backend::open(&config)?;
@@ -1032,7 +1032,7 @@ pub fn short_key(key: &str) -> String {
 fn remote_spec(r: &RemoteConfig) -> String {
     match r {
         RemoteConfig::LocalDir { path } => path.clone(),
-        RemoteConfig::GDrive { .. } => r.to_string(),
+        RemoteConfig::GDrive { .. } | RemoteConfig::Rsync { .. } => r.to_string(),
     }
 }
 

@@ -158,6 +158,8 @@ Known limitations / next steps:
   `tab.member:<key>` LWW ops. Not supported yet: passphrase-protected identities and age plugins (unwrapping happens in
   the background sync thread, which cannot prompt); a member removed but still allowed to write to the remote can still
   add segments under old keys.
+- rsync over SSH backend (`backend/rsync.rs`): runs the system's rsync/ssh against a local mirror; desktop only
+  (Android would need a native SFTP backend against the same directory). Tested with a fake `ssh`, not a real server.
 - WebDAV backend still to do. `RemoteBackend` is the extension point.
 - No compaction of op logs yet.
 - A segment that never arrives (for example, deleted on the remote) blocks that device's later ops for that tab.

@@ -11,13 +11,30 @@ pub enum RemoteConfig {
     LocalDir { path: String },
     /// A Google Drive folder (by id), possibly shared with other users.
     GDrive { folder: String },
+    /// A directory reached with rsync over SSH: `[user@]host:path`.
+    Rsync { target: String },
 }
 
 impl RemoteConfig {
     /// Parse a user-supplied remote: `gdrive:FOLDER-ID` (or a Drive folder URL),
-    /// otherwise a directory path (`~/` is expanded).
+    /// `rsync:[user@]host:path`, otherwise a directory path (`~/` is expanded).
     pub fn parse(spec: &str) -> Result<Self, String> {
         let spec = spec.trim();
+        if let Some(target) = spec.strip_prefix("rsync:") {
+            let target = target.trim();
+            let ok = match target.split_once(':') {
+                Some((host, path)) => {
+                    !host.is_empty() && !path.is_empty() && !host.contains('/') && !host.starts_with('-')
+                }
+                None => false,
+            };
+            if !ok {
+                return Err(format!("expected rsync:[user@]host:path, got rsync:{target}"));
+            }
+            return Ok(Self::Rsync {
+                target: target.to_owned(),
+            });
+        }
         if let Some(id) = spec.strip_prefix("gdrive:") {
             let id = id.trim();
             let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
@@ -56,6 +73,7 @@ impl std::fmt::Display for RemoteConfig {
         match self {
             Self::LocalDir { path } => write!(f, "directory {path}"),
             Self::GDrive { folder } => write!(f, "gdrive:{folder}"),
+            Self::Rsync { target } => write!(f, "rsync:{target}"),
         }
     }
 }
@@ -196,5 +214,17 @@ mod tests {
             Ok(RemoteConfig::LocalDir { path: "/srv/x".into() })
         );
         assert_eq!(g("x").to_string(), "gdrive:x");
+        let r = RemoteConfig::parse("rsync:me@box:cpasfait/shared").unwrap();
+        assert_eq!(
+            r,
+            RemoteConfig::Rsync {
+                target: "me@box:cpasfait/shared".into()
+            }
+        );
+        assert_eq!(r.to_string(), "rsync:me@box:cpasfait/shared");
+        assert!(RemoteConfig::parse("rsync:box:/srv/x").is_ok());
+        for bad in ["rsync:/local/path", "rsync:box:", "rsync::x", "rsync:-oProxy=x:y"] {
+            assert!(RemoteConfig::parse(bad).is_err(), "{bad}");
+        }
     }
 }
