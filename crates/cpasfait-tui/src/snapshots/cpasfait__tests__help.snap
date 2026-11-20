@@ -12,6 +12,7 @@ expression: "screen(&mut app, 100, 30)"
       │              gt/gT    next/prev tab (also Alt-→/Alt-←) 1-9    go to tab              │
       │              gn       jump to next (most prioritary) task                            │
       │              gs       jump to the task being worked on                               │
+      │              ^p       find a task (fuzzy, all tabs): ↑/↓ choose, Enter go            │
       │Editing       o/O      new task below/above             a      new subtask            │
       │              i Enter  edit title    cc  replace title   e      notes in $EDITOR      │
       │              x Space  toggle done   dd  delete          u      undo delete           │
@@ -27,7 +28,6 @@ expression: "screen(&mut app, 100, 30)"
       │              REMOTE = a directory, or gdrive:FOLDER-ID (see cpasfait-gdrive)         │
       │Press any key to close this help.                                                     │
       └──────────────────────────────────────────────────────────────────────────────────────┘
-                                                           │
                                                            │
                                                            │
                                                            │

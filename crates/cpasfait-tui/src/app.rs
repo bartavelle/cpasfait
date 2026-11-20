@@ -2,6 +2,7 @@
 
 use crate::editor::{EditResult, LineEditor};
 use crate::keymap::{self, Action, Lookup};
+use crate::search::Search;
 use crate::timebox::TimePeriod;
 use anyhow::{Context, Result, anyhow, bail};
 use cpasfait_core::backend;
@@ -21,6 +22,8 @@ pub enum Mode {
         new: bool,
     },
     Command(LineEditor),
+    /// The Ctrl-P task finder.
+    Search(Box<Search>),
     /// Editing a task's tags as a space-separated list.
     Tags {
         task: TaskId,
@@ -246,6 +249,34 @@ impl App {
                     }
                 }
             }
+            Mode::Search(search) => {
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                match key.code {
+                    KeyCode::Up | KeyCode::BackTab => search.move_selection(-1),
+                    KeyCode::Char('p' | 'k') if ctrl => search.move_selection(-1),
+                    KeyCode::Down | KeyCode::Tab => search.move_selection(1),
+                    KeyCode::Char('n' | 'j') if ctrl => search.move_selection(1),
+                    _ => {
+                        let before = search.query().to_owned();
+                        match search.editor.handle(key) {
+                            EditResult::Continue => {
+                                if search.query() != before {
+                                    search.update();
+                                }
+                            }
+                            EditResult::Cancel => self.mode = Mode::Normal,
+                            EditResult::Submit => {
+                                let chosen = search.chosen().map(|c| (c.tab, c.id));
+                                self.mode = Mode::Normal;
+                                if let Some((tab, id)) = chosen {
+                                    self.go_to_task(tab, id)?;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
             Mode::Tags { editor, task } => {
                 let task = *task;
                 match editor.handle(key) {
@@ -306,6 +337,27 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Switch to `tab` if needed and select `id`, unfolding and un-hiding as needed.
+    fn go_to_task(&mut self, tab: TabId, id: TaskId) -> Result<()> {
+        if self.tab_id().ok() != Some(tab) {
+            let Some(i) = self.tabs.iter().position(|t| t.id == tab) else {
+                bail!("tab not found");
+            };
+            self.tab_idx = i;
+            self.switch_tab()?;
+        }
+        if !self.tree.contains(id) {
+            bail!("task not found");
+        }
+        self.select(id);
+        if self.selected() != Some(id) && self.hide_done {
+            self.hide_done = false;
+            self.select(id);
+            self.info("showing done tasks (H to hide them again)");
+        }
+        Ok(())
     }
 
     fn start_tags(&mut self, task: TaskId) {
@@ -568,6 +620,7 @@ impl App {
                 self.info(format!("time spent: {}", self.time_period.label()));
             }
             Command => self.mode = Mode::Command(LineEditor::default()),
+            Search => self.mode = Mode::Search(Box::new(crate::search::Search::new(&self.repo, self.tab_id().ok())?)),
             EditTags => match self.selected() {
                 Some(t) => self.start_tags(t),
                 None => self.info("no task selected"),

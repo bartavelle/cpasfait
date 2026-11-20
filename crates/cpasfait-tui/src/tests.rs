@@ -276,3 +276,55 @@ fn time_box_cycles_periods() {
     press(&mut app, "T");
     assert!(!screen(&mut app, 90, 14).contains("time ·"));
 }
+
+#[test]
+fn ctrl_p_finds_tasks_across_tabs() {
+    let (mut app, _) = app();
+    press(
+        &mut app,
+        "oWrite report<enter>aDraft outline<enter>oReview figures<enter>",
+    );
+    press(&mut app, "ggl<tab>"); // fold "Write report"
+    press(&mut app, "ggoPrepare taxes<enter>x"); // done
+    press(&mut app, "H"); // hide done tasks
+    press(&mut app, ":tabnew Home<enter>oRepaint fence<enter>");
+    let ctrl = |app: &mut App, c| app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+    let hits = |app: &App| match &app.mode {
+        Mode::Search(s) => s
+            .hits
+            .iter()
+            .map(|h| s.candidates[h.candidate].title.clone())
+            .collect::<Vec<_>>(),
+        _ => panic!("not searching"),
+    };
+
+    ctrl(&mut app, 'p');
+    assert_eq!(hits(&app).len(), 5);
+    press(&mut app, "rep");
+    // word-start matches first; other tab and done tasks lose ties
+    assert_eq!(hits(&app), ["Repaint fence", "Write report", "Prepare taxes"]);
+    insta::assert_snapshot!("search", screen(&mut app, 90, 16));
+    press(&mut app, "<esc>");
+    assert!(matches!(app.mode, Mode::Normal));
+
+    // Go to a folded task in another tab.
+    ctrl(&mut app, 'p');
+    press(&mut app, "draft");
+    press(&mut app, "<enter>");
+    assert_eq!(app.tabs[app.tab_idx].name, "inbox");
+    assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, "Draft outline");
+
+    // Down arrow picks the second hit; a hidden done task gets shown.
+    ctrl(&mut app, 'p');
+    press(&mut app, "re");
+    let second = hits(&app)[1].clone();
+    app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    press(&mut app, "<enter>");
+    assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, second);
+    ctrl(&mut app, 'p');
+    press(&mut app, "taxes<enter>");
+    assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, "Prepare taxes");
+    assert!(!app.hide_done);
+}

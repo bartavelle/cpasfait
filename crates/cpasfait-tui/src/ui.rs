@@ -2,6 +2,7 @@
 
 use crate::app::{App, Mode};
 use crate::keymap::HELP;
+use crate::search::Search;
 use crate::timebox::{self, TimePeriod};
 use cpasfait_core::dates::today_local;
 use cpasfait_core::report::fmt_duration;
@@ -32,6 +33,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
     render_status(f, app, status);
     render_time_box(f, app, body);
+    if let Mode::Search(search) = &app.mode {
+        render_search(f, search, body);
+    }
     if matches!(app.mode, Mode::Help) {
         render_help(f);
     }
@@ -307,6 +311,7 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     }
     let (mode, mode_style) = match app.mode {
         Mode::Insert { .. } => (" INSERT ", Style::new().bg(Color::Green).fg(Color::Black).bold()),
+        Mode::Search(_) => (" FIND ", Style::new().bg(Color::Yellow).fg(Color::Black).bold()),
         _ => (" NORMAL ", Style::new().bg(Color::Blue).fg(Color::White).bold()),
     };
     let mut left = vec![Span::styled(mode, mode_style), Span::raw(" ")];
@@ -342,6 +347,91 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     let [l, r] = Layout::horizontal([Constraint::Min(1), Constraint::Length(rw)]).areas(area);
     f.render_widget(Paragraph::new(Line::from(left)), l);
     f.render_widget(Paragraph::new(right), r);
+}
+
+/// The Ctrl-P finder, centered over `body`.
+fn render_search(f: &mut Frame, search: &Search, body: Rect) {
+    let width = body.width.saturating_sub(4).min(80);
+    let rows = search.hits.len().clamp(1, 12) as u16;
+    let height = (rows + 4).min(body.height);
+    if width < 20 || height < 5 {
+        return;
+    }
+    let area = Rect {
+        x: body.x + (body.width - width) / 2,
+        y: body.y + 1.min(body.height - height),
+        width,
+        height,
+    };
+    let block = Block::bordered()
+        .title(" find task ".bold())
+        .title_bottom(Line::from(" ↑/↓ select · Enter go · Esc cancel ").right_aligned().dim())
+        .border_style(Style::new().fg(Color::Yellow));
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+    let [input, sep, list] =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("> ").fg(Color::Yellow).bold(),
+            Span::raw(search.query()),
+        ])),
+        input,
+    );
+    f.set_cursor_position(Position::new(input.x + 2 + search.editor.cursor_col() as u16, input.y));
+    f.render_widget(
+        Paragraph::new(format!("{} / {}", search.hits.len(), search.candidates.len())).dim(),
+        sep,
+    );
+    if search.hits.is_empty() {
+        f.render_widget(Paragraph::new("no match").dim(), list);
+        return;
+    }
+    let items: Vec<ListItem> = search
+        .hits
+        .iter()
+        .map(|h| {
+            let c = &search.candidates[h.candidate];
+            let base = if c.done {
+                Style::new().dim().crossed_out()
+            } else {
+                Style::new()
+            };
+            let mut spans: Vec<Span> = vec![];
+            if c.title.is_empty() {
+                spans.push(Span::styled("(untitled)", base.dim()));
+            }
+            for (i, ch) in c.title.chars().enumerate() {
+                let st = if h.positions.binary_search(&i).is_ok() {
+                    base.fg(Color::Yellow).bold()
+                } else {
+                    base
+                };
+                spans.push(Span::styled(ch.to_string(), st));
+            }
+            let mut ctx = vec![];
+            if Some(c.tab) != search.current_tab {
+                ctx.push(format!("[{}]", c.tab_name));
+            }
+            if !c.context.is_empty() {
+                ctx.push(c.context.clone());
+            }
+            if !ctx.is_empty() {
+                spans.push(Span::raw(format!("  {}", ctx.join(" "))).dim());
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    let mut state = ListState::default().with_selected(Some(search.selected));
+    f.render_stateful_widget(
+        List::new(items)
+            .highlight_symbol(Line::from(SELECTED_SYMBOL).fg(Color::Yellow).bold())
+            .highlight_spacing(HighlightSpacing::Always)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
+        list,
+        &mut state,
+    );
 }
 
 /// Time spent per task over the selected period, in the lower-right corner of `body`.

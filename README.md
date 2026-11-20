@@ -32,6 +32,7 @@ Press `?` in the TUI for all keys. The essentials:
 - `>>`/`<<` indent or outdent, `J`/`K` reorder, `+`/`-` priority
 - `s` start or stop working on the task; `S` stops whatever is running
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
+- `Ctrl-P` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
 - `T` shows time spent per task in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
 

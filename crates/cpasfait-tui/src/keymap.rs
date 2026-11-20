@@ -23,6 +23,7 @@ pub enum Action {
     ReplaceTitle,
     EditNotes,
     EditTags,
+    Search,
     ToggleDone,
     Delete,
     UndoDelete,
@@ -95,6 +96,7 @@ const BINDINGS: &[(&str, Action)] = &[
     ("H", Action::ToggleHideDone),
     ("D", Action::ToggleDetail),
     ("T", Action::CycleTimeBox),
+    ("<c-p>", Action::Search),
     (":", Action::Command),
     ("?", Action::Help),
     ("q", Action::Quit),
@@ -142,6 +144,7 @@ Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page
               gt/gT    next/prev tab (also Alt-→/Alt-←) 1-9    go to tab
               gn       jump to next (most prioritary) task
               gs       jump to the task being worked on
+              ^p       find a task (fuzzy, all tabs): ↑/↓ choose, Enter go
 Editing       o/O      new task below/above             a      new subtask
               i Enter  edit title    cc  replace title   e      notes in $EDITOR
               x Space  toggle done   dd  delete          u      undo delete

@@ -1,6 +1,8 @@
 mod app;
 mod editor;
+mod fuzzy;
 mod keymap;
+mod search;
 mod sync_worker;
 mod timebox;
 mod ui;

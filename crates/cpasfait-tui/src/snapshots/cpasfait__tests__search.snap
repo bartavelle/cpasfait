@@ -1,0 +1,20 @@
+---
+source: crates/cpasfait-tui/src/tests.rs
+expression: "screen(&mut app, 90, 16)"
+---
+ 1:inbox   2:Home                                                                   alice
+ Home                                                │ details
+▶   [┌ find task ───────────────────────────────────────────────────────────────────┐
+     │> rep                                                                         │
+     │3 / 5                                                                         │
+     │▶ Repaint fence                                                               │
+     │  Write report  [inbox]                                                       │
+     │  Prepare taxes  [inbox]                                                      │
+     └────────────────────────────────────────── ↑/↓ select · Enter go · Esc cancel ┘
+                                                     │★ next task in this tab
+                                                     │
+                                                     │work log  total 0m
+                                                     │
+                                                     │
+                                                     │
+ FIND
