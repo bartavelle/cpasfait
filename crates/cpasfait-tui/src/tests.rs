@@ -307,9 +307,8 @@ fn ctrl_p_finds_tasks_across_tabs() {
     press(&mut app, "<esc>");
     assert!(matches!(app.mode, Mode::Normal));
 
-    // Go to a folded task in another tab.
-    ctrl(&mut app, 'p');
-    press(&mut app, "draft");
+    // Go to a folded task in another tab ("/" opens the same finder).
+    press(&mut app, "/draft");
     press(&mut app, "<enter>");
     assert_eq!(app.tabs[app.tab_idx].name, "inbox");
     assert_eq!(app.tree.get(app.selected().unwrap()).unwrap().title, "Draft outline");
