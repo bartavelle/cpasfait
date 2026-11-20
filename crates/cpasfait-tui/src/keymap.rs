@@ -38,6 +38,7 @@ pub enum Action {
     JumpActive,
     ToggleHideDone,
     ToggleDetail,
+    CycleTimeBox,
     Command,
     Help,
     Quit,
@@ -93,6 +94,7 @@ const BINDINGS: &[(&str, Action)] = &[
     ("gs", Action::JumpActive),
     ("H", Action::ToggleHideDone),
     ("D", Action::ToggleDetail),
+    ("T", Action::CycleTimeBox),
     (":", Action::Command),
     ("?", Action::Help),
     ("q", Action::Quit),
@@ -147,6 +149,7 @@ Editing       o/O      new task below/above             a      new subtask
               +/-      priority up/down                 t      edit tags
 Work log      s        start/stop working on the task   S      stop any running work
 View          H        hide/show done tasks             D      toggle detail pane
+              T        time spent box: hidden → today → this week → this month
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME
               :tabnew NAME   :tabrename NAME   :tabclose!   :sync

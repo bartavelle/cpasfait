@@ -225,3 +225,54 @@ fn tag_editor() {
     assert_eq!(tags(&app), vec!["home", "urgent"]);
     assert!(matches!(app.mode, Mode::Normal));
 }
+
+#[test]
+fn time_box_cycles_periods() {
+    let (mut app, time) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
+    press(&mut app, "oAlpha<enter>oBeta<enter>oGamma<enter>oDelta<enter>");
+    let at = |d: i8, h: i8, m: i8| {
+        jiff::civil::date(2023, 11, d)
+            .at(h, m, 0, 0)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            .unwrap()
+            .timestamp()
+            .as_millisecond()
+    };
+    let set = |t: i64| time.store(t, Ordering::SeqCst);
+    set(at(1, 9, 0)); // Wednesday the 1st: this month only
+    press(&mut app, "Gs");
+    set(at(1, 9, 30));
+    press(&mut app, "S");
+    set(at(13, 9, 0)); // Monday the 13th: this week
+    press(&mut app, "ggjjs");
+    set(at(13, 12, 0));
+    press(&mut app, "S");
+    set(at(14, 8, 0)); // Tuesday the 14th: today
+    press(&mut app, "ggs");
+    set(at(14, 8, 40));
+    press(&mut app, "js"); // switches to Beta, still running
+    set(at(14, 10, 45));
+    app.detail_sessions.clear();
+
+    assert!(!screen(&mut app, 90, 14).contains("time ·"));
+    press(&mut app, "T");
+    insta::assert_snapshot!("time_today", screen(&mut app, 90, 14));
+    press(&mut app, "T");
+    let week = screen(&mut app, 90, 14);
+    assert!(week.contains("time · this week"), "{week}");
+    assert!(week.contains("total 5h 45m"), "{week}");
+    let boxed = &week[week.find("time ·").unwrap()..];
+    assert!(!boxed.contains("Delta"), "{week}");
+    let in_box = |name: &str| boxed.find(&format!("│{name} ")).unwrap();
+    assert!(
+        in_box("Gamma") < in_box("Beta") && in_box("Beta") < in_box("Alpha"),
+        "{week}"
+    );
+    press(&mut app, "T");
+    let month = screen(&mut app, 90, 14);
+    let boxed = &month[month.find("time ·").unwrap()..];
+    assert!(boxed.contains("│Delta ") && boxed.contains("total 6h 15m"), "{month}");
+    press(&mut app, "T");
+    assert!(!screen(&mut app, 90, 14).contains("time ·"));
+}

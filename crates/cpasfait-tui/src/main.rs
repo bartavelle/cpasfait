@@ -2,6 +2,7 @@ mod app;
 mod editor;
 mod keymap;
 mod sync_worker;
+mod timebox;
 mod ui;
 
 use anyhow::{Context, Result, bail};

@@ -6,7 +6,6 @@ expression: "screen(&mut app, 100, 30)"
  inbox                                                     │ details
 ▶ ▾ [ ] Project  ⏱                                         │Project
       [ ] Design                                           │
-      [x] Build  ⌛ 2099-01-01 #dev                         │
       ┌ help ────────────────────────────────────────────────────────────────────────────────┐
       │Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page                   │
       │              h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold            │
@@ -20,6 +19,7 @@ expression: "screen(&mut app, 100, 30)"
       │              +/-      priority up/down                 t      edit tags              │
       │Work log      s        start/stop working on the task   S      stop any running work  │
       │View          H        hide/show done tasks             D      toggle detail pane     │
+      │              T        time spent box: hidden → today → this week → this month        │
       │Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b         │
       │              :prio N   :title TEXT   :worknote TEXT   :user NAME                     │
       │              :tabnew NAME   :tabrename NAME   :tabclose!   :sync                     │

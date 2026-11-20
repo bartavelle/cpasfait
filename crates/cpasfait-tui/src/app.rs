@@ -2,6 +2,7 @@
 
 use crate::editor::{EditResult, LineEditor};
 use crate::keymap::{self, Action, Lookup};
+use crate::timebox::TimePeriod;
 use anyhow::{Context, Result, anyhow, bail};
 use cpasfait_core::backend;
 use cpasfait_core::dates::{parse_date, today_local};
@@ -50,6 +51,10 @@ pub struct App {
     pub collapsed: HashSet<TaskId>,
     pub hide_done: bool,
     pub show_detail: bool,
+    /// The "time spent" box (lower right).
+    pub time_period: TimePeriod,
+    /// Time zone for day/week/month boundaries.
+    pub tz: jiff::tz::TimeZone,
     pub mode: Mode,
     pub pending: String,
     pub message: Option<Message>,
@@ -84,6 +89,8 @@ impl App {
             collapsed: HashSet::new(),
             hide_done: false,
             show_detail: true,
+            time_period: TimePeriod::Hidden,
+            tz: jiff::tz::TimeZone::system(),
             mode: Mode::Normal,
             pending: String::new(),
             message: None,
@@ -556,6 +563,10 @@ impl App {
                 });
             }
             ToggleDetail => self.show_detail = !self.show_detail,
+            CycleTimeBox => {
+                self.time_period = self.time_period.next();
+                self.info(format!("time spent: {}", self.time_period.label()));
+            }
             Command => self.mode = Mode::Command(LineEditor::default()),
             EditTags => match self.selected() {
                 Some(t) => self.start_tags(t),

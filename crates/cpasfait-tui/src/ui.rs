@@ -2,6 +2,7 @@
 
 use crate::app::{App, Mode};
 use crate::keymap::HELP;
+use crate::timebox::{self, TimePeriod};
 use cpasfait_core::dates::today_local;
 use cpasfait_core::report::fmt_duration;
 use cpasfait_core::{Session, Task};
@@ -10,7 +11,7 @@ use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let [tabs, body, status] =
@@ -30,6 +31,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         render_detail(f, app, d);
     }
     render_status(f, app, status);
+    render_time_box(f, app, body);
     if matches!(app.mode, Mode::Help) {
         render_help(f);
     }
@@ -340,6 +342,82 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     let [l, r] = Layout::horizontal([Constraint::Min(1), Constraint::Length(rw)]).areas(area);
     f.render_widget(Paragraph::new(Line::from(left)), l);
     f.render_widget(Paragraph::new(right), r);
+}
+
+/// Time spent per task over the selected period, in the lower-right corner of `body`.
+fn render_time_box(f: &mut Frame, app: &App, body: Rect) {
+    let (Some(tab), true) = (app.tab(), app.time_period != TimePeriod::Hidden) else {
+        return;
+    };
+    let lines = timebox::compute(&app.repo, &app.tree, tab.id, app.time_period, &app.tz);
+    let total: i64 = lines.iter().map(|l| l.ms).sum();
+    let width = body.width.min(44);
+    let max_rows = body.height.saturating_sub(4).max(1) as usize;
+    let rows = lines.len().clamp(1, max_rows);
+    let height = (rows as u16 + 2).min(body.height);
+    if width < 16 || height < 3 {
+        return;
+    }
+    let area = Rect {
+        x: body.right() - width,
+        y: body.bottom() - height,
+        width,
+        height,
+    };
+    let inner_w = width as usize - 2;
+    let mut text: Vec<Line> = vec![];
+    if lines.is_empty() {
+        text.push(Line::from("nothing logged").dim());
+    }
+    let hidden = lines.len().saturating_sub(rows);
+    for (i, l) in lines.iter().take(rows).enumerate() {
+        if hidden > 0 && i == rows - 1 {
+            let rest: i64 = lines[i..].iter().map(|l| l.ms).sum();
+            text.push(time_row(
+                &format!("… {} more", lines.len() - i),
+                &timebox::fmt_human(rest),
+                inner_w,
+                Style::new().dim(),
+            ));
+            break;
+        }
+        let mut st = Style::new();
+        if l.task.is_some() && l.task == app.active.as_ref().and_then(|s| s.task) {
+            st = st.fg(Color::Green);
+        }
+        text.push(time_row(&l.title, &timebox::fmt_human(l.ms), inner_w, st));
+    }
+    let block = Block::bordered()
+        .title(format!(" time · {} ", app.time_period.label()).bold())
+        .title_bottom(Line::from(format!(" total {} ", timebox::fmt_human(total))).right_aligned())
+        .border_style(Style::new().fg(Color::Cyan));
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(text).block(block), area);
+}
+
+/// `title ……… duration`, the title truncated to fit `width`.
+fn time_row(title: &str, dur: &str, width: usize, style: Style) -> Line<'static> {
+    let dur_w = dur.width();
+    let avail = width.saturating_sub(dur_w + 1);
+    let mut t = String::new();
+    let mut w = 0;
+    for c in title.chars() {
+        let cw = c.width().unwrap_or(0);
+        if w + cw > avail {
+            t.pop();
+            t.push('…');
+            w = t.width();
+            break;
+        }
+        t.push(c);
+        w += cw;
+    }
+    let pad = width.saturating_sub(w + dur_w);
+    Line::from(vec![
+        Span::styled(t, style),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(dur.to_owned(), style.bold()),
+    ])
 }
 
 fn render_help(f: &mut Frame) {
