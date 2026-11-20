@@ -198,3 +198,30 @@ fn alt_arrows_switch_tabs() {
     alt(&mut app, KeyCode::Left);
     assert_eq!(current(&app), "inbox");
 }
+
+#[test]
+fn tag_editor() {
+    let (mut app, _) = app();
+    press(&mut app, "ofirst<esc>");
+    let id = app.selected().unwrap();
+    let tags = |app: &App| app.repo.task(id).unwrap().tags;
+    press(&mut app, "twork #urgent,home<enter>");
+    assert_eq!(tags(&app), vec!["home", "urgent", "work"]);
+    // Prefilled with the current tags; remove one by editing the list.
+    let Mode::Tags { editor, .. } = ({
+        press(&mut app, "t");
+        &app.mode
+    }) else {
+        panic!("not in tag mode")
+    };
+    assert_eq!(editor.text(), "home urgent work ");
+    press(&mut app, "<esc>"); // cancel: unchanged
+    assert_eq!(tags(&app), vec!["home", "urgent", "work"]);
+    press(&mut app, ":tag<enter>"); // same editor from the command line
+    for _ in 0.."work ".len() {
+        press(&mut app, "<bs>");
+    }
+    press(&mut app, "<enter>");
+    assert_eq!(tags(&app), vec!["home", "urgent"]);
+    assert!(matches!(app.mode, Mode::Normal));
+}

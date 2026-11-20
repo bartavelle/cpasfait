@@ -22,6 +22,7 @@ pub enum Action {
     EditTitle,
     ReplaceTitle,
     EditNotes,
+    EditTags,
     ToggleDone,
     Delete,
     UndoDelete,
@@ -75,6 +76,7 @@ const BINDINGS: &[(&str, Action)] = &[
     ("<enter>", Action::EditTitle),
     ("cc", Action::ReplaceTitle),
     ("e", Action::EditNotes),
+    ("t", Action::EditTags),
     ("x", Action::ToggleDone),
     (" ", Action::ToggleDone),
     ("dd", Action::Delete),
@@ -142,7 +144,7 @@ Editing       o/O      new task below/above             a      new subtask
               i Enter  edit title    cc  replace title   e      notes in $EDITOR
               x Space  toggle done   dd  delete          u      undo delete
               >>/<<    indent/outdent                    J/K    move down/up
-              +/-      priority up/down
+              +/-      priority up/down                 t      edit tags
 Work log      s        start/stop working on the task   S      stop any running work
 View          H        hide/show done tasks             D      toggle detail pane
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b

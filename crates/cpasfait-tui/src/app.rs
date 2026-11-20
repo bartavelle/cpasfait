@@ -20,6 +20,11 @@ pub enum Mode {
         new: bool,
     },
     Command(LineEditor),
+    /// Editing a task's tags as a space-separated list.
+    Tags {
+        task: TaskId,
+        editor: LineEditor,
+    },
     Help,
 }
 
@@ -234,6 +239,21 @@ impl App {
                     }
                 }
             }
+            Mode::Tags { editor, task } => {
+                let task = *task;
+                match editor.handle(key) {
+                    EditResult::Continue => Ok(()),
+                    EditResult::Cancel => {
+                        self.mode = Mode::Normal;
+                        Ok(())
+                    }
+                    EditResult::Submit => {
+                        let text = editor.text().to_owned();
+                        self.mode = Mode::Normal;
+                        self.replace_tags(task, &text)
+                    }
+                }
+            }
             Mode::Command(editor) => match editor.handle(key) {
                 EditResult::Continue => {
                     if editor.text().is_empty() && key.code == KeyCode::Backspace {
@@ -279,6 +299,40 @@ impl App {
                 }
             }
         }
+    }
+
+    fn start_tags(&mut self, task: TaskId) {
+        let current = self.tree.get(task).map(|t| t.tags.join(" ")).unwrap_or_default();
+        let text = if current.is_empty() {
+            current
+        } else {
+            format!("{current} ")
+        };
+        self.mode = Mode::Tags {
+            task,
+            editor: LineEditor::new(&text),
+        };
+    }
+
+    /// Set the tags of `task` to the words of `text` (`#` prefixes allowed).
+    fn replace_tags(&mut self, task: TaskId, text: &str) -> Result<()> {
+        let wanted: std::collections::BTreeSet<&str> = text
+            .split([' ', ','])
+            .map(|w| w.trim_start_matches(['#', '+']))
+            .filter(|w| !w.is_empty())
+            .collect();
+        let current: Vec<String> = self.tree.get(task).map(|t| t.tags.clone()).unwrap_or_default();
+        for old in &current {
+            if !wanted.contains(old.as_str()) {
+                self.repo.set_tag(task, old, false)?;
+            }
+        }
+        for new in &wanted {
+            if !current.iter().any(|c| c == new) {
+                self.repo.set_tag(task, new, true)?;
+            }
+        }
+        self.refresh()
     }
 
     fn start_insert(&mut self, task: TaskId, text: &str, new: bool) {
@@ -503,6 +557,10 @@ impl App {
             }
             ToggleDetail => self.show_detail = !self.show_detail,
             Command => self.mode = Mode::Command(LineEditor::default()),
+            EditTags => match self.selected() {
+                Some(t) => self.start_tags(t),
+                None => self.info("no task selected"),
+            },
             Help => self.mode = Mode::Help,
             Quit => self.quit = true,
         }
@@ -542,7 +600,8 @@ impl App {
             "tag" | "tags" => {
                 let t = need_task(self)?;
                 if arg.is_empty() {
-                    bail!("usage: :tag +add -remove");
+                    self.start_tags(t);
+                    return Ok(());
                 }
                 for w in arg.split_whitespace() {
                     let (on, name) = match w.strip_prefix('-') {

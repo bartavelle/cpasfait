@@ -4,9 +4,9 @@ expression: "screen(&mut app, 90, 12)"
 ---
  1:inbox                                                                            alice
  inbox                                               │ details
-▾ [ ] Project  ⏱                                     │Project
-    [ ] Design                                       │
-    [x] Build  ⌛ 2099-01-01 #dev                     │
+▶ ▾ [ ] Project  ⏱                                   │Project
+      [ ] Design                                     │
+      [x] Build  ⌛ 2099-01-01 #dev                   │
                                                      │status   todo
                                                      │priority 0
                                                      │due      -

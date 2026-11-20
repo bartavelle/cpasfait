@@ -9,7 +9,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 pub fn render(f: &mut Frame, app: &mut App) {
@@ -116,6 +116,9 @@ fn task_prefix(app: &App, t: &Task, depth: usize, has_children: bool) -> Vec<Spa
     v
 }
 
+/// Marks the selected row (the list reserves its width on every row).
+const SELECTED_SYMBOL: &str = "▶ ";
+
 fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> usize {
     let title = match app.tab() {
         Some(t) => format!(" {} ", if t.name.is_empty() { "(unnamed)" } else { &t.name }),
@@ -139,7 +142,7 @@ fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> u
             match &editing {
                 Some((id, ed)) if *id == row.id => {
                     spans.push(Span::styled(ed.text().to_owned(), Style::new().underlined()));
-                    cursor_pos = Some((i, prefix_w + ed.cursor_col()));
+                    cursor_pos = Some((i, SELECTED_SYMBOL.width() + prefix_w + ed.cursor_col()));
                 }
                 _ => {
                     let mut st = Style::new();
@@ -168,7 +171,9 @@ fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> u
     }
     let list = List::new(items)
         .block(block)
-        .highlight_style(Style::new().bg(Color::DarkGray));
+        .highlight_symbol(Line::from(SELECTED_SYMBOL).fg(Color::Yellow).bold())
+        .highlight_spacing(HighlightSpacing::Always)
+        .highlight_style(Style::new().add_modifier(Modifier::REVERSED));
     f.render_stateful_widget(list, area, state);
     if let Some((i, col)) = cursor_pos {
         let y = i.saturating_sub(state.offset());
@@ -284,6 +289,18 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     if let Mode::Command(ed) = &app.mode {
         f.render_widget(Paragraph::new(format!(":{}", ed.text())), area);
         f.set_cursor_position(Position::new(area.x + 1 + ed.cursor_col() as u16, area.y));
+        return;
+    }
+    if let Mode::Tags { editor: ed, .. } = &app.mode {
+        const PROMPT: &str = "tags (space-separated): ";
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::raw(PROMPT).fg(Color::Cyan),
+                Span::raw(ed.text()),
+            ])),
+            area,
+        );
+        f.set_cursor_position(Position::new(area.x + (PROMPT.len() + ed.cursor_col()) as u16, area.y));
         return;
     }
     let (mode, mode_style) = match app.mode {
