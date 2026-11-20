@@ -1,0 +1,347 @@
+//! Rendering.
+
+use crate::app::{App, Mode};
+use crate::keymap::HELP;
+use cpasfait_core::dates::today_local;
+use cpasfait_core::report::fmt_duration;
+use cpasfait_core::{Session, Task};
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
+
+pub fn render(f: &mut Frame, app: &mut App) {
+    let [tabs, body, status] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
+    render_tabs(f, app, tabs);
+    let show_detail = app.show_detail && body.width >= 70;
+    let (list_area, detail_area) = if show_detail {
+        let [l, d] = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(body);
+        (l, Some(d))
+    } else {
+        (body, None)
+    };
+    let mut state = std::mem::take(&mut app.list);
+    app.page_height = render_tree(f, app, &mut state, list_area);
+    app.list = state;
+    if let Some(d) = detail_area {
+        render_detail(f, app, d);
+    }
+    render_status(f, app, status);
+    if matches!(app.mode, Mode::Help) {
+        render_help(f);
+    }
+}
+
+fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans = vec![];
+    for (i, t) in app.tabs.iter().enumerate() {
+        let name = if t.name.is_empty() { "(unnamed)" } else { &t.name };
+        let label = format!(" {}:{}{} ", i + 1, name, if t.remote.is_some() { " ⇅" } else { "" });
+        let style = if i == app.tab_idx {
+            Style::new().bg(Color::Blue).fg(Color::White).bold()
+        } else {
+            Style::new().fg(Color::Gray)
+        };
+        spans.push(Span::styled(label, style));
+        spans.push(Span::raw(" "));
+    }
+    let user = format!("{} ", app.repo.user());
+    let left = Line::from(spans);
+    f.render_widget(Paragraph::new(left), area);
+    let w = user.width() as u16;
+    if area.width > w {
+        let r = Rect {
+            x: area.x + area.width - w,
+            width: w,
+            ..area
+        };
+        f.render_widget(Paragraph::new(user.dim()), r);
+    }
+}
+
+fn due_style(due: jiff::civil::Date) -> Style {
+    let today = today_local();
+    if due < today {
+        Style::new().fg(Color::Red).bold()
+    } else if due == today {
+        Style::new().fg(Color::Yellow).bold()
+    } else {
+        Style::new().fg(Color::Yellow)
+    }
+}
+
+/// Spans shown after the title: priority, due, tags, who is working on it.
+fn task_suffix<'a>(app: &App, t: &'a Task) -> Vec<Span<'a>> {
+    let mut v = vec![];
+    if let Some(d) = t.due {
+        v.push(Span::styled(format!("  ⌛{d}"), due_style(d)));
+    }
+    for tag in &t.tags {
+        v.push(Span::styled(format!(" #{tag}"), Style::new().fg(Color::Cyan)));
+    }
+    for s in app.open_sessions.iter().filter(|s| s.task == Some(t.id)) {
+        if Some(s.id) == app.active.as_ref().map(|a| a.id) {
+            v.push(Span::styled("  ⏱", Style::new().fg(Color::Green).bold()));
+        } else {
+            v.push(Span::styled(format!("  ⏱{}", s.user), Style::new().fg(Color::Magenta)));
+        }
+    }
+    v
+}
+
+fn task_prefix(app: &App, t: &Task, depth: usize, has_children: bool) -> Vec<Span<'static>> {
+    let fold = if !has_children {
+        "  "
+    } else if app.collapsed.contains(&t.id) {
+        "▸ "
+    } else {
+        "▾ "
+    };
+    let check = if t.is_done() { "[x] " } else { "[ ] " };
+    let mut v = vec![Span::raw("  ".repeat(depth)), Span::raw(fold).dim(), Span::raw(check)];
+    if t.priority > 0 {
+        let color = match t.priority {
+            1 => Color::Blue,
+            2 => Color::Yellow,
+            _ => Color::Red,
+        };
+        v.push(Span::styled(
+            format!("{} ", "!".repeat(t.priority.min(3) as usize)),
+            Style::new().fg(color).bold(),
+        ));
+    }
+    v
+}
+
+fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> usize {
+    let title = match app.tab() {
+        Some(t) => format!(" {} ", if t.name.is_empty() { "(unnamed)" } else { &t.name }),
+        None => " no tab ".into(),
+    };
+    let block = Block::new().borders(Borders::RIGHT).title(title.bold());
+    let inner = block.inner(area);
+    let editing = match &app.mode {
+        Mode::Insert { task, editor, .. } => Some((*task, editor.clone())),
+        _ => None,
+    };
+    let mut cursor_pos = None;
+    let items: Vec<ListItem> = app
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let t = app.tree.get(row.id).expect("row of a visible task");
+            let mut spans = task_prefix(app, t, row.depth, row.has_children);
+            let prefix_w: usize = spans.iter().map(|s| s.content.width()).sum();
+            match &editing {
+                Some((id, ed)) if *id == row.id => {
+                    spans.push(Span::styled(ed.text().to_owned(), Style::new().underlined()));
+                    cursor_pos = Some((i, prefix_w + ed.cursor_col()));
+                }
+                _ => {
+                    let mut st = Style::new();
+                    if t.is_done() {
+                        st = st.dim().crossed_out();
+                    }
+                    if app.next == Some(t.id) {
+                        st = st.bold();
+                    }
+                    let title = if t.title.is_empty() {
+                        "(untitled)".to_owned()
+                    } else {
+                        t.title.clone()
+                    };
+                    spans.push(Span::styled(title, st));
+                    spans.extend(task_suffix(app, t));
+                }
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    if items.is_empty() {
+        f.render_widget(block, area);
+        f.render_widget(Paragraph::new("No tasks. Press o to add one, ? for help.").dim(), inner);
+        return inner.height as usize;
+    }
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::new().bg(Color::DarkGray));
+    f.render_stateful_widget(list, area, state);
+    if let Some((i, col)) = cursor_pos {
+        let y = i.saturating_sub(state.offset());
+        if y < inner.height as usize {
+            f.set_cursor_position(Position::new(inner.x + col as u16, inner.y + y as u16));
+        }
+    }
+    inner.height as usize
+}
+
+fn fmt_time(ms: i64) -> String {
+    match jiff::Timestamp::from_millisecond(ms) {
+        Ok(ts) => ts
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
+            .strftime("%Y-%m-%d %H:%M")
+            .to_string(),
+        Err(_) => "?".into(),
+    }
+}
+
+fn render_detail(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::new().title(" details ".bold());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let Some(t) = app.selected().and_then(|id| app.tree.get(id)) else {
+        return;
+    };
+    let now = app.repo.now_ms();
+    let label = |s: &'static str| Span::styled(format!("{s:<9}"), Style::new().fg(Color::Gray));
+    let mut lines = vec![
+        Line::from(Span::styled(t.title.clone(), Style::new().bold())),
+        Line::from(
+            app.tree
+                .path(t.id)
+                .iter()
+                .rev()
+                .skip(1)
+                .rev()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" › "),
+        )
+        .dim(),
+        Line::raw(""),
+        Line::from(vec![
+            label("status"),
+            Span::raw(if t.is_done() { "done" } else { "todo" }),
+        ]),
+        Line::from(vec![label("priority"), Span::raw(t.priority.to_string())]),
+        Line::from(vec![
+            label("due"),
+            match t.due {
+                Some(d) => Span::styled(d.to_string(), due_style(d)),
+                None => Span::raw("-"),
+            },
+        ]),
+        Line::from(vec![
+            label("tags"),
+            Span::styled(
+                if t.tags.is_empty() {
+                    "-".into()
+                } else {
+                    t.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
+                },
+                Style::new().fg(Color::Cyan),
+            ),
+        ]),
+    ];
+    if app.next == Some(t.id) {
+        lines.push(Line::from(Span::styled(
+            "★ next task in this tab",
+            Style::new().fg(Color::Green),
+        )));
+    }
+    lines.push(Line::raw(""));
+    if !t.notes.is_empty() {
+        lines.push(Line::from("notes".underlined()));
+        lines.extend(t.notes.lines().map(|l| Line::raw(l.to_owned())));
+        lines.push(Line::raw(""));
+    }
+    let total: i64 = app.detail_sessions.iter().map(|s| s.duration_ms(now)).sum();
+    lines.push(Line::from(vec![
+        "work log".underlined(),
+        Span::raw(format!("  total {}", fmt_duration(total))),
+    ]));
+    for s in app.detail_sessions.iter().take(50) {
+        lines.push(session_line(s, now));
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn session_line(s: &Session, now: i64) -> Line<'static> {
+    let mut v = vec![
+        Span::raw(s.start.map(fmt_time).unwrap_or_default()),
+        Span::raw(format!(" {:>6} ", fmt_duration(s.duration_ms(now)))),
+        Span::styled(s.user.clone(), Style::new().fg(Color::Magenta)),
+    ];
+    if s.is_open() {
+        v.push(Span::styled(" running", Style::new().fg(Color::Green)));
+    }
+    if !s.note.is_empty() {
+        v.push(Span::raw(format!("  {}", s.note)).italic());
+    }
+    Line::from(v)
+}
+
+fn fmt_clock(ms: i64) -> String {
+    let s = ms / 1000;
+    format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
+}
+
+fn render_status(f: &mut Frame, app: &App, area: Rect) {
+    if let Mode::Command(ed) = &app.mode {
+        f.render_widget(Paragraph::new(format!(":{}", ed.text())), area);
+        f.set_cursor_position(Position::new(area.x + 1 + ed.cursor_col() as u16, area.y));
+        return;
+    }
+    let (mode, mode_style) = match app.mode {
+        Mode::Insert { .. } => (" INSERT ", Style::new().bg(Color::Green).fg(Color::Black).bold()),
+        _ => (" NORMAL ", Style::new().bg(Color::Blue).fg(Color::White).bold()),
+    };
+    let mut left = vec![Span::styled(mode, mode_style), Span::raw(" ")];
+    if let Some(m) = &app.message {
+        left.push(Span::styled(
+            m.text.clone(),
+            if m.error {
+                Style::new().fg(Color::Red)
+            } else {
+                Style::new()
+            },
+        ));
+    } else if !app.pending.is_empty() {
+        left.push(Span::raw(app.pending.clone()).dim());
+    }
+    let mut right = vec![];
+    if let Some(s) = &app.active {
+        let title = s
+            .task
+            .and_then(|id| app.tree.get(id).map(|t| t.title.clone()))
+            .or_else(|| s.task.and_then(|id| app.repo.task(id).ok().map(|t| t.title)))
+            .unwrap_or_default();
+        right.push(Span::styled(
+            format!("⏱ {} {} ", title, fmt_clock(s.duration_ms(app.repo.now_ms()))),
+            Style::new().fg(Color::Green).bold(),
+        ));
+    }
+    if let Some(s) = &app.sync_status {
+        right.push(Span::raw(format!("{s} ")).dim());
+    }
+    let right = Line::from(right);
+    let rw = right.width() as u16;
+    let [l, r] = Layout::horizontal([Constraint::Min(1), Constraint::Length(rw)]).areas(area);
+    f.render_widget(Paragraph::new(Line::from(left)), l);
+    f.render_widget(Paragraph::new(right), r);
+}
+
+fn render_help(f: &mut Frame) {
+    let area = f.area();
+    let h = (HELP.lines().count() as u16 + 2).min(area.height);
+    let w = (HELP.lines().map(|l| l.width()).max().unwrap_or(0) as u16 + 4).min(area.width);
+    let r = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, r);
+    f.render_widget(
+        Paragraph::new(HELP).block(
+            Block::bordered()
+                .title(" help ".bold())
+                .style(Style::new().add_modifier(Modifier::empty())),
+        ),
+        r,
+    );
+}

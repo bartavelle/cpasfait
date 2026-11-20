@@ -1,0 +1,34 @@
+---
+source: crates/cpasfait-tui/src/tests.rs
+expression: "screen(&mut app, 100, 30)"
+---
+ 1:inbox                                                                                      alice
+ inbox                                                     │ details
+▾ [ ] Project  ⏱                                           │Project
+    [ ] Design                                             │
+    [x] Build  ⌛ 2099-01-01 #dev                           │
+      ┌ help ────────────────────────────────────────────────────────────────────────────────┐
+      │Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page                   │
+      │              h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold            │
+      │              gt/gT    next/prev tab                    1-9    go to tab              │
+      │              gn       jump to next (most prioritary) task                            │
+      │              gs       jump to the task being worked on                               │
+      │Editing       o/O      new task below/above             a      new subtask            │
+      │              i Enter  edit title    cc  replace title   e      notes in $EDITOR      │
+      │              x Space  toggle done   dd  delete          u      undo delete           │
+      │              >>/<<    indent/outdent                    J/K    move down/up          │
+      │              +/-      priority up/down                                               │
+      │Work log      s        start/stop working on the task   S      stop any running work  │
+      │View          H        hide/show done tasks             D      toggle detail pane     │
+      │Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b         │
+      │              :prio N   :title TEXT   :worknote TEXT   :user NAME                     │
+      │              :tabnew NAME   :tabrename NAME   :tabclose!   :sync                     │
+      │              :tabremote DIR|none   :tabjoin DIR [TAB-ID]   :rebuild   :q             │
+      │Press any key to close this help.                                                     │
+      └──────────────────────────────────────────────────────────────────────────────────────┘
+                                                           │
+                                                           │
+                                                           │
+                                                           │
+                                                           │
+ NORMAL                                                                           ⏱ Project 0:00:00
