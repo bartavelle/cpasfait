@@ -66,6 +66,8 @@ const BINDINGS: &[(&str, Action)] = &[
     ("za", Action::ToggleFold),
     ("gt", Action::NextTab),
     ("gT", Action::PrevTab),
+    ("<c-pagedown>", Action::NextTab),
+    ("<c-pageup>", Action::PrevTab),
     ("o", Action::AddBelow),
     ("O", Action::AddAbove),
     ("a", Action::AddChild),
@@ -106,6 +108,8 @@ pub fn key_name(key: KeyEvent) -> Option<String> {
         KeyCode::Right => "<right>".into(),
         KeyCode::Tab => "<tab>".into(),
         KeyCode::Enter => "<enter>".into(),
+        KeyCode::PageDown if ctrl => "<c-pagedown>".into(),
+        KeyCode::PageUp if ctrl => "<c-pageup>".into(),
         KeyCode::PageDown => "<c-d>".into(),
         KeyCode::PageUp => "<c-u>".into(),
         _ => return None,
@@ -130,7 +134,7 @@ pub fn lookup(seq: &str) -> Lookup {
 pub const HELP: &str = "\
 Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page
               h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold
-              gt/gT    next/prev tab                    1-9    go to tab
+              gt/gT    next/prev tab (also ^PgDn/^PgUp) 1-9    go to tab
               gn       jump to next (most prioritary) task
               gs       jump to the task being worked on
 Editing       o/O      new task below/above             a      new subtask

@@ -183,3 +183,18 @@ fn render_snapshot() {
     press(&mut app, "?");
     insta::assert_snapshot!("help", screen(&mut app, 100, 30));
 }
+
+#[test]
+fn ctrl_page_keys_switch_tabs() {
+    let (mut app, _) = app();
+    press(&mut app, ":tabnew Work<enter>"); // tabs: inbox, Work; on Work
+    let current = |app: &App| app.tabs[app.tab_idx].name.clone();
+    assert_eq!(current(&app), "Work");
+    let ctrl = |app: &mut App, code| app.on_key(KeyEvent::new(code, KeyModifiers::CONTROL));
+    ctrl(&mut app, KeyCode::PageDown);
+    assert_eq!(current(&app), "inbox"); // wraps around
+    ctrl(&mut app, KeyCode::PageUp);
+    assert_eq!(current(&app), "Work");
+    ctrl(&mut app, KeyCode::PageUp);
+    assert_eq!(current(&app), "inbox");
+}

@@ -10,7 +10,7 @@ expression: "screen(&mut app, 100, 30)"
       ┌ help ────────────────────────────────────────────────────────────────────────────────┐
       │Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page                   │
       │              h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold            │
-      │              gt/gT    next/prev tab                    1-9    go to tab              │
+      │              gt/gT    next/prev tab (also ^PgDn/^PgUp) 1-9    go to tab              │
       │              gn       jump to next (most prioritary) task                            │
       │              gs       jump to the task being worked on                               │
       │Editing       o/O      new task below/above             a      new subtask            │
