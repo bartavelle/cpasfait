@@ -146,7 +146,13 @@ Milestones 1–6 are implemented. Deviations from the plan above:
 - Sibling placement queries siblings directly instead of building the tree, so adding a task does not get slower as the tab grows.
 
 Known limitations / next steps:
-- Only the local-directory backend exists. Google Drive and WebDAV backends are next, and `RemoteBackend` is the extension point.
+- Google Drive backend (cargo feature `gdrive`, on by default in the binaries): `backend/gdrive/` with the path
+  mapping (`mod.rs`, tolerant of duplicate same-named folders), a blocking `ureq` client (`http.rs`), and OAuth
+  loopback + PKCE with a user-provided "Desktop app" client (`auth.rs`). Tested against an in-memory fake and a mock
+  HTTP server, not yet against the real Drive. Shared folders need the full `drive` scope: with `drive.file` a user
+  cannot see a folder that another account created. While the OAuth client's consent screen is in "Testing"
+  status, Google expires refresh tokens after 7 days. `cpasfait-gdrive` handles login, mkdir and share.
+- WebDAV backend still to do. `RemoteBackend` is the extension point.
 - No compaction of op logs yet.
 - A segment that never arrives (for example, deleted on the remote) blocks that device's later ops for that tab.
 - Keymap and colors are hard-coded (`keymap.rs`).

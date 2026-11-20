@@ -10,7 +10,7 @@ and devices.
 |---|---|
 | `cpasfait-core` | model, op log, SQLite storage, sync. No UI. Meant to be shared with a future mobile app (UniFFI). |
 | `cpasfait-tui` | the `cpasfait` terminal UI |
-| `cpasfait-tools` | `cpasfait-next` and `cpasfait-report` |
+| `cpasfait-tools` | `cpasfait-next`, `cpasfait-report` and `cpasfait-gdrive` |
 
 See `docs/architecture.md` for the design and `docs/format.md` for the data and sync format.
 
@@ -46,6 +46,32 @@ The directory can be anything that some tool keeps in sync between machines
 ever creates new files there and never edits them, so concurrent use is safe.
 The TUI syncs at startup, every minute, a few seconds after an edit, on `:sync`
 and on exit.
+
+### Sharing through Google Drive
+
+cpasfait talks to the Drive API directly. It has no Google-verified app, so
+each user needs an OAuth client of their own (or a shared one from whoever
+set things up):
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project, enable the **Google Drive API**, configure the OAuth consent
+   screen (add yourself and the other users as test users), and create an
+   OAuth client of type **Desktop app**. Download its JSON.
+2. `cpasfait-gdrive login --client client_secret.json` opens a browser and
+   stores the credentials in `<data dir>/gdrive.json`.
+3. `cpasfait-gdrive mkdir cpasfait` creates a folder and prints `gdrive:ID`;
+   `cpasfait-gdrive share gdrive:ID friend@example.com` gives someone write access.
+4. In the TUI: `:tabremote gdrive:ID` on the first device, `:tabjoin gdrive:ID`
+   (a folder URL works too) on the others.
+
+Notes:
+
+- The default scope is full Drive access, because the narrower `drive.file`
+  scope cannot see folders created by another account. Use
+  `login --scope file` if a single Google account uses the remote.
+- While the consent screen is in "Testing" status, Google expires the
+  authorization after 7 days; run `cpasfait-gdrive login` again (the client is
+  remembered). Publishing the app, or a Workspace "Internal" app, avoids this.
 
 ### Companion tools
 

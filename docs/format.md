@@ -92,3 +92,22 @@ work on a task closes the device's open session(s) first.
 - Files whose names start with `.` are ignored (temporary files, sync-tool metadata).
 
 Joining a shared tab = knowing the remote root plus the tab id, then pulling.
+
+### Google Drive
+
+The root is a Drive folder, named by its id (`gdrive:<folder-id>`). Each path
+component is a sub-folder with that name, and segment files are regular files
+created with a single multipart upload, so they are never seen half-written.
+
+Drive allows several children with the same name, and has no create-if-absent,
+so two clients may create duplicate `<tab-id>` or `ops` folders. Clients must
+therefore:
+
+- resolve a path to the *set* of all folders matching it, and list the union
+  of their contents;
+- when writing, use an existing matching folder (the one with the smallest id)
+  and create a folder only when none exists.
+
+A duplicate *file* (a retried upload) has identical content and can be read
+from either copy. Trashed files are ignored.
+

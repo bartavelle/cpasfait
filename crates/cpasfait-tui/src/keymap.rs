@@ -143,5 +143,6 @@ View          H        hide/show done tasks             D      toggle detail pan
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME
               :tabnew NAME   :tabrename NAME   :tabclose!   :sync
-              :tabremote DIR|none   :tabjoin DIR [TAB-ID]   :rebuild   :q
+              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild   :q
+              REMOTE = a directory, or gdrive:FOLDER-ID (see cpasfait-gdrive)
 Press any key to close this help.";

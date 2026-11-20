@@ -4,6 +4,8 @@
 //! so a backend needs no locking or compare-and-swap: listing, reading and
 //! create-only writes are enough (local dir, Google Drive, WebDAV, S3, ...).
 
+#[cfg(feature = "gdrive")]
+pub mod gdrive;
 pub mod localdir;
 
 use crate::error::Result;
@@ -21,5 +23,11 @@ pub trait RemoteBackend: Send {
 pub fn open(config: &RemoteConfig) -> Result<Box<dyn RemoteBackend>> {
     match config {
         RemoteConfig::LocalDir { path } => Ok(Box::new(localdir::LocalDir::new(path))),
+        #[cfg(feature = "gdrive")]
+        RemoteConfig::GDrive { folder } => Ok(Box::new(gdrive::open(folder)?)),
+        #[cfg(not(feature = "gdrive"))]
+        RemoteConfig::GDrive { .. } => Err(crate::Error::Backend(
+            "this build has no Google Drive support (cargo feature `gdrive`)".into(),
+        )),
     }
 }

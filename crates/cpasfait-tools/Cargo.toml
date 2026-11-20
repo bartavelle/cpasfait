@@ -13,8 +13,17 @@ jiff = "1.0.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 
+[features]
+default = ["gdrive"]
+# Google Drive remotes.
+gdrive = ["cpasfait-core/gdrive"]
+
 [lints]
 workspace = true
+
+[[bin]]
+name = "cpasfait-gdrive"
+required-features = ["gdrive"]
 
 [dev-dependencies]
 rand = "0.10.4"

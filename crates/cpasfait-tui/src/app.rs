@@ -621,8 +621,8 @@ impl App {
                     "" => {
                         let r = self.tab().and_then(|t| t.remote.clone());
                         self.info(match r {
-                            Some(RemoteConfig::LocalDir { path }) => format!("remote: directory {path}"),
-                            None => "no remote (use :tabremote DIR)".into(),
+                            Some(r) => format!("remote: {r}"),
+                            None => "no remote (use :tabremote DIR|gdrive:FOLDER-ID)".into(),
                         });
                     }
                     "none" => {
@@ -630,9 +630,8 @@ impl App {
                         self.refresh()?;
                         self.info("remote removed");
                     }
-                    dir => {
-                        let path = absolute(dir)?;
-                        self.repo.set_remote(tab, Some(&RemoteConfig::LocalDir { path }))?;
+                    spec => {
+                        self.repo.set_remote(tab, Some(&parse_remote(spec)?))?;
                         self.refresh()?;
                         self.requests.push(Request::Sync);
                         self.info("remote set, syncing");
@@ -641,9 +640,10 @@ impl App {
             }
             "tabjoin" => {
                 let mut parts = arg.split_whitespace();
-                let dir = parts.next().ok_or_else(|| anyhow!("usage: :tabjoin DIR [TAB-ID]"))?;
-                let path = absolute(dir)?;
-                let config = RemoteConfig::LocalDir { path };
+                let dir = parts
+                    .next()
+                    .ok_or_else(|| anyhow!("usage: :tabjoin DIR|gdrive:FOLDER-ID [TAB-ID]"))?;
+                let config = parse_remote(dir)?;
                 let tab: TabId = match parts.next() {
                     Some(id) => id.parse().context("bad tab id")?,
                     None => {
@@ -688,10 +688,12 @@ impl App {
     }
 }
 
-fn absolute(dir: &str) -> Result<String> {
-    let expanded = match dir.strip_prefix("~/") {
-        Some(rest) => std::path::PathBuf::from(std::env::var("HOME").context("HOME not set")?).join(rest),
-        None => std::path::PathBuf::from(dir),
-    };
-    Ok(std::path::absolute(expanded)?.to_string_lossy().into_owned())
+/// Parse a remote spec (`gdrive:ID`, a Drive folder URL, or a directory made absolute).
+fn parse_remote(spec: &str) -> Result<RemoteConfig> {
+    Ok(match RemoteConfig::parse(spec).map_err(|e| anyhow!(e))? {
+        RemoteConfig::LocalDir { path } => RemoteConfig::LocalDir {
+            path: std::path::absolute(path)?.to_string_lossy().into_owned(),
+        },
+        other => other,
+    })
 }

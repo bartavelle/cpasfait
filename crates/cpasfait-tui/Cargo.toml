@@ -16,6 +16,11 @@ jiff = "1.0.1"
 ratatui = "0.30.2"
 unicode-width = "0.2.3"
 
+[features]
+default = ["gdrive"]
+# Google Drive remotes.
+gdrive = ["cpasfait-core/gdrive"]
+
 [lints]
 workspace = true
 

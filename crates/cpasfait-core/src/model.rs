@@ -9,6 +9,55 @@ use serde::{Deserialize, Serialize};
 pub enum RemoteConfig {
     /// A directory, possibly synced by an external tool (Syncthing, Drive desktop, ...).
     LocalDir { path: String },
+    /// A Google Drive folder (by id), possibly shared with other users.
+    GDrive { folder: String },
+}
+
+impl RemoteConfig {
+    /// Parse a user-supplied remote: `gdrive:FOLDER-ID` (or a Drive folder URL),
+    /// otherwise a directory path (`~/` is expanded).
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let spec = spec.trim();
+        if let Some(id) = spec.strip_prefix("gdrive:") {
+            let id = id.trim();
+            let valid = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if !valid {
+                return Err(format!("bad Google Drive folder id {id:?}"));
+            }
+            return Ok(Self::GDrive { folder: id.to_owned() });
+        }
+        if let Some(rest) = spec.strip_prefix("https://drive.google.com/") {
+            // https://drive.google.com/drive/folders/<id>?usp=sharing, .../drive/u/0/folders/<id>
+            let id = rest
+                .split("/folders/")
+                .nth(1)
+                .and_then(|r| r.split(['?', '/', '#']).next());
+            return match id {
+                Some(id) => Self::parse(&format!("gdrive:{id}")),
+                None => Err("not a Google Drive folder URL".into()),
+            };
+        }
+        if spec.is_empty() {
+            return Err("empty remote".into());
+        }
+        let path = match spec.strip_prefix("~/") {
+            Some(rest) => match std::env::var_os("HOME") {
+                Some(home) => std::path::Path::new(&home).join(rest).to_string_lossy().into_owned(),
+                None => spec.to_owned(),
+            },
+            None => spec.to_owned(),
+        };
+        Ok(Self::LocalDir { path })
+    }
+}
+
+impl std::fmt::Display for RemoteConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LocalDir { path } => write!(f, "directory {path}"),
+            Self::GDrive { folder } => write!(f, "gdrive:{folder}"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -63,5 +112,31 @@ impl Session {
             Some(s) => (self.end.unwrap_or(now) - s).max(0),
             None => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RemoteConfig;
+
+    #[test]
+    fn parse_remote() {
+        let g = |f: &str| RemoteConfig::GDrive { folder: f.into() };
+        assert_eq!(RemoteConfig::parse("gdrive:1AbC-d_9"), Ok(g("1AbC-d_9")));
+        assert_eq!(
+            RemoteConfig::parse("https://drive.google.com/drive/folders/1AbC?usp=sharing"),
+            Ok(g("1AbC"))
+        );
+        assert_eq!(
+            RemoteConfig::parse("https://drive.google.com/drive/u/0/folders/XyZ"),
+            Ok(g("XyZ"))
+        );
+        assert!(RemoteConfig::parse("gdrive:a'b").is_err());
+        assert!(RemoteConfig::parse("https://drive.google.com/file/d/x").is_err());
+        assert_eq!(
+            RemoteConfig::parse("/srv/x"),
+            Ok(RemoteConfig::LocalDir { path: "/srv/x".into() })
+        );
+        assert_eq!(g("x").to_string(), "gdrive:x");
     }
 }
