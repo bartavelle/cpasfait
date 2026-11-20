@@ -224,7 +224,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
     };
     {
         let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE task_dep; PRAGMA user_version = 1;")
+        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; PRAGMA user_version = 1;")
             .unwrap();
     }
     // The read-only open used by the companion tools migrates too.
@@ -236,6 +236,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
 fn dependencies_across_tabs() {
     use cpasfait_core::DepState;
     use cpasfait_core::backend::localdir::LocalDir;
+    use cpasfait_core::crypto::Identity;
     use cpasfait_core::sync::sync_tab;
     let mut r1 = Repo::open_in_memory().unwrap();
     let work = r1.create_tab("work").unwrap();
@@ -267,10 +268,13 @@ fn dependencies_across_tabs() {
     // Another device that only shares "work" knows nothing about "home".
     let remote = tempfile::tempdir().unwrap();
     let backend = LocalDir::new(remote.path());
-    sync_tab(&mut r1, work, &backend).unwrap();
+    let (k1, k2) = (Identity::generate(), Identity::generate());
+    r1.share_tab(work, k1.recipient()).unwrap();
+    r1.set_member(work, k2.recipient(), Some("bob")).unwrap();
+    sync_tab(&mut r1, work, &backend, &k1).unwrap();
     let mut r2 = Repo::open_in_memory().unwrap();
     r2.add_known_tab(work).unwrap();
-    sync_tab(&mut r2, work, &backend).unwrap();
+    sync_tab(&mut r2, work, &backend, &k2).unwrap();
     let d = r2.dependencies(report).unwrap();
     assert_eq!(d.requires[0].state, DepState::UnknownTab);
     assert_eq!(d.requires[0].tab, Some(home));

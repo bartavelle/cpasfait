@@ -67,6 +67,29 @@ pub struct TabInfo {
     pub remote: Option<RemoteConfig>,
 }
 
+/// A member of a shared tab.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Member {
+    /// Public key (age `age1…` or SSH).
+    pub recipient: String,
+    pub name: String,
+    /// False once removed.
+    pub active: bool,
+    /// When the membership was last changed.
+    pub hlc: crate::hlc::Hlc,
+}
+
+/// A generation of a shared tab's encryption key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Epoch {
+    pub id: uuid::Uuid,
+    pub key: crate::crypto::Key,
+    /// The epoch this one replaces (`None` for the first one).
+    pub prev: Option<uuid::Uuid>,
+    /// Length of the chain from the first epoch.
+    pub depth: u32,
+}
+
 /// State of the other end of a dependency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

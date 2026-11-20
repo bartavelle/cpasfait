@@ -160,4 +160,6 @@ Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :tabnew NAME   :tabrename NAME   :tabclose!   :sync
               :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild   :q
               REMOTE = a directory, or gdrive:FOLDER-ID (see cpasfait-gdrive)
+Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME
+              :tabmembers   (remote data is encrypted to the members' age/SSH keys)
 Press any key to close this help.";

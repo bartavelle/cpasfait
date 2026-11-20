@@ -39,6 +39,7 @@ are ordered after them.
 |---|---|---|
 | `tab.name` | string | |
 | `tab.deleted` | bool | tombstone |
+| `tab.member:<public key>` | string \| `false` | a member of a shared tab and their display name; `false` once removed. The key is an age X25519 recipient (`age1…`) or an SSH public key without comment (`ssh-ed25519 AAAA…`) |
 | `task.title` | string | |
 | `task.notes` | string | free text |
 | `task.status` | `"todo"` \| `"done"` | default `todo` |
@@ -90,20 +91,83 @@ work on a task closes the device's open session(s) first.
 ## Remote layout
 
 ```
-<root>/<tab-id>/ops/<device-id>/<first-seq>-<last-seq>.jsonl
+<root>/<tab-id>/keys/<epoch-id>/<device-id>-<random-uuid>.age
+<root>/<tab-id>/ops/<device-id>/<first-seq>-<last-seq>.seg
 ```
 
-- Seq numbers are zero-padded to 20 digits. The file holds one op per line, in seq order.
-- A device only creates files in its own directory and never modifies or
-  deletes them. Because each name is unique, the remote needs no locking or
-  compare-and-swap: listing, reading and create-only writes are enough.
+- Seq numbers are zero-padded to 20 digits. A segment holds one op per line,
+  in seq order, encrypted (see below).
+- A device only creates files in its own directory (key files: under its own
+  name) and never modifies or deletes them. Because each name is unique, the
+  remote needs no locking or compare-and-swap: listing, reading and
+  create-only writes are enough.
 - Readers keep a cursor per (tab, device) holding the last seq ingested.
   Segments are read in order. If the next segment does not start at
-  `cursor + 1`, the reader stops for that device until the missing segment
-  shows up (for example, when a sync tool has not delivered it yet).
+  `cursor + 1`, or uses a key the reader does not have yet, the reader stops
+  for that device until it can go on (for example, when a sync tool has not
+  delivered a file yet).
 - Files whose names start with `.` are ignored (temporary files, sync-tool metadata).
 
-Joining a shared tab = knowing the remote root plus the tab id, then pulling.
+Joining a shared tab = knowing the remote root plus the tab id, having been
+invited (a key file encrypted to you), then pulling.
+
+## Encryption
+
+Everything on a remote is encrypted; there is no plaintext mode.
+
+**Epochs.** A shared tab has one or more epochs, each with a random 256-bit
+key. The first is created by the device that shares the tab. A new one
+(*rotation*) is created when someone who was given the newest key is no
+longer a member. Writers use the newest epoch: the longest chain, then the
+highest epoch id (UUIDv7), so concurrent rotations settle on the same one.
+
+**Segments** are `"CPF1" | epoch id (16 bytes) | nonce (24 bytes) |
+XChaCha20-Poly1305 ciphertext`. The associated data is the 44-byte header
+followed by the file's remote path (`<tab>/ops/<device>/<first>-<last>.seg`),
+so a segment cannot be moved, renamed or replayed elsewhere.
+
+**Key files** are [age](https://age-encryption.org/v1) files encrypted to
+members' public keys. The plaintext is JSON:
+
+```json
+{"v": 1, "tab": "<tab id>", "epoch": "<epoch id>", "key": "<hex>",
+ "prev": null | {"epoch": "<parent epoch id>", "mac": "<hex>"},
+ "recipients": ["age1…", "ssh-ed25519 AAAA…"],
+ "exclude": [{"recipient": "age1…", "hlc": {"wall": 0, "counter": 0, "device": "…"}}]}
+```
+
+- `mac` is HMAC-SHA256, keyed with the parent epoch's key, of
+  `"cpasfait epoch v1\0" | tab id (16 bytes) | epoch id (16 bytes) | key`.
+  Only someone who already had a key of the tab can produce it, so the
+  remote's owner cannot introduce a key of its own.
+- `recipients` lists everyone the file is encrypted to: every current member
+  allowed to have this key. So any member reading it knows who already has
+  the key.
+- `exclude` lists the members removed when the file was written, with the
+  clock of their removal. Nobody may give this epoch to such a recipient
+  unless they were re-added later (a newer `tab.member` op).
+
+**Accepting keys.** A reader accepts a key file when:
+- its `tab` and `epoch` match its path;
+- the epoch is either already held with the same key, or chained (valid
+  `mac`) to an epoch it holds.
+
+A device that holds no key yet (joining) trusts the root epoch (`prev: null`)
+if exactly one is encrypted to it; with several, it refuses to join. Anything
+else is ignored.
+
+**On every sync**, after fetching keys and pulling segments, a member:
+
+1. starts a new epoch if a recipient of the newest one is no longer a member;
+2. for every epoch it holds, if some current member allowed to have it is
+   not among the `recipients` of the listed key files, writes a new key file
+   for that epoch to all such members.
+
+So a new member is given every key (the whole history), concurrent
+invitations and removals converge, and a removed member gets no key made
+after their removal. A removed member who keeps write access to the remote
+can still add segments under keys they had: removing their access to the
+remote itself is part of removing them.
 
 ### Google Drive
 
@@ -112,7 +176,7 @@ component is a sub-folder with that name, and segment files are regular files
 created with a single multipart upload, so they are never seen half-written.
 
 Drive allows several children with the same name, and has no create-if-absent,
-so two clients may create duplicate `<tab-id>` or `ops` folders. Clients must
+so two clients may create duplicate `<tab-id>`, `ops`, `keys`… folders. Clients must
 therefore:
 
 - resolve a path to the *set* of all folders matching it, and list the union

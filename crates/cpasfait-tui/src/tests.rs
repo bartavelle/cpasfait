@@ -1,5 +1,6 @@
 use crate::app::{App, Mode};
 use cpasfait_core::Repo;
+use cpasfait_core::crypto::Identity;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -12,7 +13,14 @@ fn app() -> (App, Arc<AtomicI64>) {
     let t = time.clone();
     repo.set_now(move || t.load(Ordering::SeqCst));
     repo.set_user("alice").unwrap();
-    (App::new(repo).unwrap(), time)
+    let mut app = App::new(repo).unwrap();
+    // Never the user's real key file.
+    app.identity = Some(Identity::generate());
+    (app, time)
+}
+
+fn message(app: &App) -> String {
+    app.message.as_ref().map(|m| m.text.clone()).unwrap_or_default()
 }
 
 /// Feed keys: plain chars, plus `<enter>`, `<esc>`, `<tab>`, `<bs>`.
@@ -155,9 +163,13 @@ fn tab_join_through_directory() {
     let (mut a, _) = app();
     press(&mut a, "oShared task<enter>");
     press(&mut a, &format!(":tabremote {dir}<enter>"));
-    // the outer loop would hand this to the sync worker; do it inline
-    crate::sync_worker::run_once(&mut a.repo);
     let (mut b, _) = app();
+    let key = b.identity.as_ref().unwrap().recipient().to_owned();
+    press(&mut a, &format!(":tabinvite {key}<enter>"));
+    // the outer loop would hand this to the sync worker; do it inline
+    let tab = a.tabs[a.tab_idx].id;
+    let backend = cpasfait_core::backend::localdir::LocalDir::new(&dir);
+    cpasfait_core::sync::sync_tab(&mut a.repo, tab, &backend, a.identity.as_ref().unwrap()).unwrap();
     press(&mut b, &format!(":tabjoin {dir}<enter>"));
     assert!(
         b.message.as_ref().is_some_and(|m| !m.error),
@@ -401,8 +413,13 @@ fn dependencies_across_tabs_in_tui() {
     // A device that only has the "inbox" tab sees an error instead.
     let remote = tempfile::tempdir().unwrap();
     let backend = LocalDir::new(remote.path());
-    sync_tab(&mut app.repo, work, &backend).unwrap();
-    let (mut other, _) = app_with_tab(work, &backend);
+    let bob = Identity::generate();
+    app.repo
+        .share_tab(work, app.identity.as_ref().unwrap().recipient())
+        .unwrap();
+    app.repo.set_member(work, bob.recipient(), Some("bob")).unwrap();
+    sync_tab(&mut app.repo, work, &backend, app.identity.as_ref().unwrap()).unwrap();
+    let (mut other, _) = app_with_tab(work, &backend, bob);
     other.detail_sessions.clear();
     let tab = app.tabs.iter().find(|t| t.name == "Home").unwrap().id;
     let s = screen(&mut other, 160, 14);
@@ -426,6 +443,7 @@ fn dependencies_across_tabs_in_tui() {
 fn app_with_tab(
     tab: cpasfait_core::TabId,
     backend: &dyn cpasfait_core::backend::RemoteBackend,
+    me: Identity,
 ) -> (App, Arc<AtomicI64>) {
     let time = Arc::new(AtomicI64::new(1_700_000_000_000));
     let mut repo = Repo::open_in_memory().unwrap();
@@ -433,8 +451,9 @@ fn app_with_tab(
     repo.set_now(move || t.load(Ordering::SeqCst));
     repo.set_user("bob").unwrap();
     repo.add_known_tab(tab).unwrap();
-    cpasfait_core::sync::sync_tab(&mut repo, tab, backend).unwrap();
+    cpasfait_core::sync::sync_tab(&mut repo, tab, backend, &me).unwrap();
     let mut app = App::new(repo).unwrap();
+    app.identity = Some(me);
     let i = app.tabs.iter().position(|t| t.id == tab).unwrap();
     app.tab_idx = i;
     app.refresh().unwrap();
@@ -442,4 +461,74 @@ fn app_with_tab(
     app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
     app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
     (app, time)
+}
+
+#[test]
+fn sharing_a_tab() {
+    use cpasfait_core::backend::localdir::LocalDir;
+    use cpasfait_core::sync::sync_tab;
+    let remote = tempfile::tempdir().unwrap();
+    let dir = remote.path().display().to_string();
+    let backend = LocalDir::new(remote.path());
+    let (mut alice, _) = app();
+    press(&mut alice, "oPaint<enter>");
+    press(&mut alice, ":tabinvite age1x<enter>");
+    assert!(message(&alice).contains("not shared"), "{}", message(&alice));
+    press(&mut alice, &format!(":tabremote {dir}<enter>"));
+    assert!(message(&alice).contains("encrypted"), "{}", message(&alice));
+    let tab = alice.tabs[alice.tab_idx].id;
+    sync_tab(&mut alice.repo, tab, &backend, alice.identity.as_ref().unwrap()).unwrap();
+
+    // Bob joins before being invited: told what to send.
+    let (mut bob, _) = app();
+    bob.repo.set_user("bob").unwrap();
+    press(&mut bob, ":mykey<enter>");
+    let bob_key = bob.identity.as_ref().unwrap().recipient().to_owned();
+    assert!(message(&bob).contains(&bob_key));
+    press(&mut bob, &format!(":tabjoin {dir}<enter>"));
+    assert!(
+        message(&bob).contains(&format!(":tabinvite {bob_key}")),
+        "{}",
+        message(&bob)
+    );
+
+    press(&mut alice, &format!(":tabinvite {bob_key} Bob B.<enter>"));
+    assert!(
+        message(&alice).contains(&format!("invited Bob B.: they can now run :tabjoin {dir} {tab}")),
+        "{}",
+        message(&alice)
+    );
+    press(&mut alice, &format!(":tabinvite {bob_key}<enter>"));
+    assert!(message(&alice).contains("already a member"));
+    press(&mut alice, ":tabmembers<enter>");
+    let m = message(&alice);
+    assert!(
+        m.starts_with("members: alice (age1") && m.contains(", you), Bob B. (age1"),
+        "{m}"
+    );
+    sync_tab(&mut alice.repo, tab, &backend, alice.identity.as_ref().unwrap()).unwrap();
+
+    sync_tab(&mut bob.repo, tab, &backend, bob.identity.as_ref().unwrap()).unwrap();
+    bob.refresh().unwrap();
+    assert_eq!(bob.tree.iter().next().unwrap().title, "Paint");
+
+    press(&mut alice, ":tabrevoke nobody<enter>");
+    assert!(message(&alice).contains("no member"));
+    press(&mut alice, ":tabrevoke Bob B.<enter>");
+    assert!(message(&alice).starts_with("removed Bob B."), "{}", message(&alice));
+    press(&mut alice, ":tabrevoke alice<enter>");
+    assert!(message(&alice).contains("last member"), "{}", message(&alice));
+}
+
+#[test]
+fn key_arguments() {
+    use crate::app::short_key;
+    assert_eq!(
+        short_key("age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq"),
+        "age1qyqs…90gq"
+    );
+    assert_eq!(
+        short_key("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsK"),
+        "ssh-ed25519 …AAAAIHsK"
+    );
 }

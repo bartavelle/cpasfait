@@ -69,10 +69,10 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
         if event::poll(Duration::from_millis(500))? {
             match event::read()? {
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
-                    let before = app.repo.data_version().unwrap_or(0);
+                    let before = app.repo.local_changes();
                     app.on_key(k);
                     // Local edits: push them soon (debounced).
-                    if worker.is_some() && app.repo.data_version().unwrap_or(0) != before {
+                    if worker.is_some() && app.repo.local_changes() != before {
                         last_edit_sync.get_or_insert_with(Instant::now);
                     }
                 }
@@ -111,6 +111,8 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
                 });
                 if let Some(e) = r.errors.first() {
                     app.error(format!("sync: {e}"));
+                } else if r.waiting_for_key > 0 {
+                    app.info("some changes use a key you don't have yet (not invited back, or keys not synced yet)");
                 } else if explicit_syncs > 0 {
                     app.info(format!("synced: {} received, {} sent", r.pulled, r.pushed));
                 } else if r.pulled > 0 {

@@ -10,7 +10,7 @@ and devices.
 |---|---|
 | `cpasfait-core` | model, op log, SQLite storage, sync. No UI. Meant to be shared with a future mobile app (UniFFI). |
 | `cpasfait-tui` | the `cpasfait` terminal UI |
-| `cpasfait-tools` | `cpasfait-next`, `cpasfait-report` and `cpasfait-gdrive` |
+| `cpasfait-tools` | `cpasfait-next`, `cpasfait-report`, `cpasfait-key` and `cpasfait-gdrive` |
 
 See `docs/architecture.md` for the design and `docs/format.md` for the data and sync format.
 
@@ -39,9 +39,18 @@ Press `?` in the TUI for all keys. The essentials:
 
 ### Sharing a tab
 
+Everything a shared tab puts on the remote is end-to-end encrypted to the
+members' keys: the remote (Google, a sync service) sees only random-looking
+files and their sizes and dates. Keys are [age](https://age-encryption.org)
+keys; an SSH key works too.
+
 ```
-:tabremote ~/Sync/cpasfait     # on the first device: attach the current tab to a directory
-:tabjoin ~/Sync/cpasfait       # on the other devices: join it
+:mykey                         # on the other person's device: show your public key (age1…)
+:tabremote ~/Sync/cpasfait     # on the first device: share the current tab through a directory
+:tabinvite age1… Bob           # give Bob access (an `ssh-ed25519 AAAA…` key works too)
+:tabjoin ~/Sync/cpasfait       # on Bob's devices: join it
+:tabmembers                    # who has access
+:tabrevoke Bob                 # remove Bob: a new key is used from the next sync on
 ```
 
 The directory can be anything that some tool keeps in sync between machines
@@ -49,6 +58,25 @@ The directory can be anything that some tool keeps in sync between machines
 ever creates new files there and never edits them, so concurrent use is safe.
 The TUI syncs at startup, every minute, a few seconds after an edit, on `:sync`
 and on exit.
+
+Keys:
+
+- Your secret key is the first found of `$CPASFAIT_IDENTITY` (an age identity
+  file, or an unencrypted SSH private key), `<data dir>/identity.txt`, and
+  age's `~/.config/age/keys.txt`. If there is none, cpasfait creates
+  `<data dir>/identity.txt` (also `cpasfait-key`, which prints your public key).
+  **Back it up**: without it, a new device cannot read your shared tabs (the
+  data on your existing devices is not affected; another member can also
+  invite a new key).
+- Use the same key on all your devices, or invite each device's key.
+- Joining before being invited is fine: the tab fills in once a member has
+  run `:tabinvite` and synced.
+- A new member can read the whole history. A removed member keeps what they
+  already had, but cannot read anything written after their removal. Also
+  stop sharing the remote folder with them: as long as they can still write
+  there, they can still add changes.
+- Passphrase-protected identities and age plugins (YubiKey…) are not
+  supported yet.
 
 ### Sharing through Google Drive
 
@@ -64,8 +92,9 @@ set things up):
    stores the credentials in `<data dir>/gdrive.json`.
 3. `cpasfait-gdrive mkdir cpasfait` creates a folder and prints `gdrive:ID`;
    `cpasfait-gdrive share gdrive:ID friend@example.com` gives someone write access.
-4. In the TUI: `:tabremote gdrive:ID` on the first device, `:tabjoin gdrive:ID`
-   (a folder URL works too) on the others.
+4. In the TUI: `:tabremote gdrive:ID` and `:tabinvite KEY` for each other
+   member on the first device, `:tabjoin gdrive:ID` (a folder URL works too)
+   on the others.
 
 Notes:
 

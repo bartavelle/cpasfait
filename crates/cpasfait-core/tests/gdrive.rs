@@ -6,35 +6,45 @@ use cpasfait_core::backend::RemoteBackend;
 use cpasfait_core::backend::gdrive::http::{Agent, Endpoints, HttpDrive, TokenSource};
 use cpasfait_core::backend::gdrive::mem::MemDrive;
 use cpasfait_core::backend::gdrive::{DriveApi, FOLDER_MIME, GDrive};
+use cpasfait_core::crypto::Identity;
 use cpasfait_core::sync::{remote_tabs, sync_tab};
-use cpasfait_core::{Place, Repo};
+use cpasfait_core::{Place, Repo, TabId};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn converge(b1: &dyn RemoteBackend, b2: &dyn RemoteBackend) {
-    let mut r1 = Repo::open_in_memory().unwrap();
-    let mut r2 = Repo::open_in_memory().unwrap();
+/// Device 1 shares a tab and invites device 2.
+fn shared(b1: &dyn RemoteBackend) -> (Repo, Repo, Identity, Identity, TabId) {
+    let (mut r1, r2) = (Repo::open_in_memory().unwrap(), Repo::open_in_memory().unwrap());
+    let (k1, k2) = (Identity::generate(), Identity::generate());
     let tab = r1.create_tab("shared").unwrap();
+    r1.share_tab(tab, k1.recipient()).unwrap();
+    r1.set_member(tab, k2.recipient(), Some("bob")).unwrap();
+    sync_tab(&mut r1, tab, b1, &k1).unwrap();
+    (r1, r2, k1, k2, tab)
+}
+
+fn converge(b1: &dyn RemoteBackend, b2: &dyn RemoteBackend) {
+    let (mut r1, mut r2, k1, k2, tab) = shared(b1);
     let a = r1.add_task(tab, Place::LastChildOf(None), "a").unwrap();
-    sync_tab(&mut r1, tab, b1).unwrap();
+    sync_tab(&mut r1, tab, b1, &k1).unwrap();
 
     assert_eq!(remote_tabs(b2).unwrap(), vec![tab]);
     r2.add_known_tab(tab).unwrap();
-    let s = sync_tab(&mut r2, tab, b2).unwrap();
-    assert_eq!(s.pulled, 3);
+    let s = sync_tab(&mut r2, tab, b2, &k2).unwrap();
+    assert_eq!(s.pulled, 5);
 
     r1.set_title(a, "one").unwrap();
     r2.add_task(tab, Place::LastChildOf(Some(a)), "child").unwrap();
     r2.toggle_work(a).unwrap();
     for _ in 0..2 {
-        sync_tab(&mut r1, tab, b1).unwrap();
-        sync_tab(&mut r2, tab, b2).unwrap();
+        sync_tab(&mut r1, tab, b1, &k1).unwrap();
+        sync_tab(&mut r2, tab, b2, &k2).unwrap();
     }
     assert_eq!(r1.dump_model().unwrap(), r2.dump_model().unwrap());
     assert_eq!(r2.task(a).unwrap().title, "one");
-    let s = sync_tab(&mut r1, tab, b1).unwrap();
+    let s = sync_tab(&mut r1, tab, b1, &k1).unwrap();
     assert_eq!((s.pulled, s.pushed), (0, 0));
 }
 
@@ -46,43 +56,49 @@ fn two_devices_converge_through_fake_drive() {
     converge(&b1, &b2);
 }
 
+/// `backend` seen from inside the `<tab>` folder: `<tab>/x` is `x` there.
+struct InTab<B>(B, String);
+
+impl<B: RemoteBackend> RemoteBackend for InTab<B> {
+    fn list(&self, prefix: &str) -> cpasfait_core::Result<Vec<String>> {
+        let inner = prefix.strip_prefix(&self.1).unwrap_or("").trim_start_matches('/');
+        Ok(self
+            .0
+            .list(inner)?
+            .into_iter()
+            .map(|p| format!("{}/{p}", self.1))
+            .collect())
+    }
+    fn get(&self, path: &str) -> cpasfait_core::Result<Vec<u8>> {
+        self.0.get(&path[self.1.len() + 1..])
+    }
+    fn put_new(&self, path: &str, data: &[u8]) -> cpasfait_core::Result<()> {
+        self.0.put_new(&path[self.1.len() + 1..], data)
+    }
+}
+
 #[test]
 fn concurrently_created_tab_folders_are_merged() {
-    // Both devices created `<tab>/ops` before seeing each other's.
+    // Both devices created the `<tab>` folder before seeing each other's.
     let mem = MemDrive::new();
-    let mut r1 = Repo::open_in_memory().unwrap();
-    let mut r2 = Repo::open_in_memory().unwrap();
-    let tab = r1.create_tab("t").unwrap();
+    let root = GDrive::new(mem.clone(), MemDrive::ROOT);
+    let (mut r1, mut r2, k1, k2, tab) = shared(&root);
+    let t = mem.create_folder(MemDrive::ROOT, &tab.to_string()).unwrap();
+    let dups: Vec<_> = mem.children(MemDrive::ROOT).unwrap();
+    assert_eq!(dups.len(), 2);
+    let second = GDrive::new(mem.clone(), t);
+    let second = InTab(second, tab.to_string());
+
     r2.add_known_tab(tab).unwrap();
+    sync_tab(&mut r2, tab, &root, &k2).unwrap();
+    r1.add_task(tab, Place::LastChildOf(None), "from r1").unwrap();
     r2.add_task(tab, Place::LastChildOf(None), "from r2").unwrap();
-    for _ in 0..2 {
-        let t = mem.create_folder(MemDrive::ROOT, &tab.to_string()).unwrap();
-        mem.create_folder(&t, "ops").unwrap();
-    }
-    // Each device writes into "its" duplicate.
-    let tdirs: Vec<_> = mem.children(MemDrive::ROOT).unwrap();
-    let ops_of = |i: usize| mem.children(&tdirs[i].id).unwrap()[0].id.clone();
-    let b1 = GDrive::new(mem.clone(), ops_of(0));
-    let b2 = GDrive::new(mem.clone(), ops_of(1));
-    let push = |r: &mut Repo, b: &GDrive<MemDrive>| {
-        let ops = r.unpushed_ops(tab).unwrap();
-        let path = format!(
-            "{}/{:020}-{:020}.jsonl",
-            r.device(),
-            ops[0].seq,
-            ops.last().unwrap().seq
-        );
-        b.put_new(&path, &cpasfait_core::sync::encode_ops(&ops).unwrap())
-            .unwrap();
-        r.mark_pushed(tab, ops.last().unwrap().seq).unwrap();
-    };
-    push(&mut r1, &b1);
-    push(&mut r2, &b2);
-    let root = GDrive::new(mem, MemDrive::ROOT);
-    sync_tab(&mut r1, tab, &root).unwrap();
-    sync_tab(&mut r2, tab, &root).unwrap();
+    sync_tab(&mut r1, tab, &root, &k1).unwrap();
+    sync_tab(&mut r2, tab, &second, &k2).unwrap(); // only sees the second folder
+    sync_tab(&mut r1, tab, &root, &k1).unwrap();
+    sync_tab(&mut r2, tab, &root, &k2).unwrap();
     assert_eq!(r1.dump_model().unwrap(), r2.dump_model().unwrap());
-    assert_eq!(r1.tasks(tab).unwrap().len(), 1);
+    assert_eq!(r1.tasks(tab).unwrap().len(), 2);
 }
 
 // ---------------------------------------------------------------- HTTP mock

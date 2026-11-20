@@ -85,6 +85,13 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
     match change {
         TabName(s) => set!(ensure_tab, "tab", "name", s),
         TabDeleted(b) => set!(ensure_tab, "tab", "deleted", b),
+        TabMember { recipient, name } => {
+            ensure_tab()?;
+            conn.execute(
+                "INSERT OR REPLACE INTO tab_member(tab, recipient, name) VALUES (?1, ?2, ?3)",
+                params![entity, recipient, name],
+            )?;
+        }
         TaskTitle(s) => set!(ensure_task, "task", "title", s),
         TaskNotes(s) => set!(ensure_task, "task", "notes", s),
         TaskStatus(s) => set!(ensure_task, "task", "status", s.as_str()),

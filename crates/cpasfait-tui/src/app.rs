@@ -6,8 +6,9 @@ use crate::search::{Purpose, Search};
 use crate::timebox::TimePeriod;
 use anyhow::{Context, Result, anyhow, bail};
 use cpasfait_core::backend;
+use cpasfait_core::crypto::Identity;
 use cpasfait_core::dates::{parse_date, today_local};
-use cpasfait_core::sync::remote_tabs;
+use cpasfait_core::sync::{invited_to, remote_tabs, sync_tab};
 use cpasfait_core::{Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -73,6 +74,8 @@ pub struct App {
     pub detail_deps: cpasfait_core::Dependencies,
     pub next: Option<TaskId>,
     pub sync_status: Option<String>,
+    /// This user's secret key, loaded (or created) on first need.
+    pub identity: Option<Identity>,
     pub requests: Vec<Request>,
     pub quit: bool,
     deleted_stack: Vec<TaskId>,
@@ -108,6 +111,7 @@ impl App {
             detail_deps: Default::default(),
             next: None,
             sync_status: None,
+            identity: None,
             requests: vec![],
             quit: false,
             deleted_stack: vec![],
@@ -120,6 +124,27 @@ impl App {
 
     pub fn tab(&self) -> Option<&TabInfo> {
         self.tabs.get(self.tab_idx)
+    }
+
+    /// Load the identity, creating one if there is none. Returns a note when
+    /// it was just created.
+    fn ensure_identity(&mut self) -> Result<Option<String>> {
+        if self.identity.is_some() {
+            return Ok(None);
+        }
+        let (id, created) = Identity::load_or_create_default()?;
+        let note = created.then(|| {
+            format!(
+                "created your key in {}",
+                id.path().map(|p| p.display().to_string()).unwrap_or_default()
+            )
+        });
+        self.identity = Some(id);
+        Ok(note)
+    }
+
+    fn me(&self) -> &Identity {
+        self.identity.as_ref().expect("ensure_identity first")
     }
 
     fn tab_id(&self) -> Result<TabId> {
@@ -811,10 +836,18 @@ impl App {
                         self.info("remote removed");
                     }
                     spec => {
-                        self.repo.set_remote(tab, Some(&parse_remote(spec)?))?;
+                        let config = parse_remote(spec)?;
+                        let note = self.ensure_identity()?;
+                        let me = self.me().recipient().to_owned();
+                        self.repo.share_tab(tab, &me)?;
+                        self.repo.set_remote(tab, Some(&config))?;
                         self.refresh()?;
                         self.requests.push(Request::Sync);
-                        self.info("remote set, syncing");
+                        let msg = "remote set (end-to-end encrypted), syncing; add members with :tabinvite KEY";
+                        self.info(match note {
+                            Some(n) => format!("{n}; {msg}"),
+                            None => msg.into(),
+                        });
                     }
                 }
             }
@@ -824,15 +857,27 @@ impl App {
                     .next()
                     .ok_or_else(|| anyhow!("usage: :tabjoin DIR|gdrive:FOLDER-ID [TAB-ID]"))?;
                 let config = parse_remote(dir)?;
+                self.ensure_identity()?;
+                let b = backend::open(&config)?;
                 let tab: TabId = match parts.next() {
                     Some(id) => id.parse().context("bad tab id")?,
                     None => {
-                        let b = backend::open(&config)?;
                         let known: HashSet<TabId> = self.tabs.iter().map(|t| t.id).collect();
-                        let ids: Vec<TabId> = remote_tabs(b.as_ref())?
+                        let mut ids: Vec<TabId> = remote_tabs(b.as_ref())?
                             .into_iter()
                             .filter(|t| !known.contains(t))
                             .collect();
+                        if ids.len() > 1 {
+                            let mut invited = vec![];
+                            for t in &ids {
+                                if invited_to(b.as_ref(), *t, self.me())? {
+                                    invited.push(*t);
+                                }
+                            }
+                            if !invited.is_empty() {
+                                ids = invited;
+                            }
+                        }
                         match ids.as_slice() {
                             [one] => *one,
                             [] => bail!("no new tab found in {dir}"),
@@ -845,13 +890,105 @@ impl App {
                 };
                 self.repo.add_known_tab(tab)?;
                 self.repo.set_remote(tab, Some(&config))?;
-                cpasfait_core::sync::sync_tab(&mut self.repo, tab, backend::open(&config)?.as_ref())?;
+                let res = sync_tab(&mut self.repo, tab, b.as_ref(), self.identity.as_ref().expect("loaded"));
                 self.refresh()?;
                 if let Some(i) = self.tabs.iter().position(|t| t.id == tab) {
                     self.tab_idx = i;
                     self.switch_tab()?;
                 }
-                self.info("joined");
+                match res {
+                    Ok(_) => self.info("joined"),
+                    Err(cpasfait_core::Error::NotInvited(key)) => self.info(format!(
+                        "joined, waiting for an invitation: ask a member to run :tabinvite {key}"
+                    )),
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            "tabinvite" => {
+                let usage = "usage: :tabinvite KEY [NAME] (KEY: age1… or ssh-ed25519 AAAA…, see :mykey)";
+                let tab = self.tab_id()?;
+                let (key, name) = split_key(arg).ok_or_else(|| anyhow!(usage))?;
+                if self.repo.epochs(tab)?.is_empty() {
+                    bail!("this tab is not shared: set a remote first with :tabremote");
+                }
+                let key = cpasfait_core::crypto::parse_recipient(&key)?;
+                let members = self.repo.members(tab)?;
+                if members.iter().any(|m| m.active && m.recipient == key) {
+                    bail!("already a member");
+                }
+                let name = name.unwrap_or_else(|| short_key(&key));
+                self.repo.set_member(tab, &key, Some(&name))?;
+                self.refresh()?;
+                self.requests.push(Request::Sync);
+                let remote = self.tab().and_then(|t| t.remote.clone());
+                self.info(match remote {
+                    Some(r) => format!("invited {name}: they can now run :tabjoin {} {tab}", remote_spec(&r)),
+                    None => format!("invited {name}"),
+                });
+            }
+            "tabrevoke" => {
+                let tab = self.tab_id()?;
+                if arg.is_empty() {
+                    bail!("usage: :tabrevoke NAME|KEY (see :tabmembers)");
+                }
+                let members: Vec<_> = self.repo.members(tab)?.into_iter().filter(|m| m.active).collect();
+                let found: Vec<_> = members
+                    .iter()
+                    .filter(|m| m.name == arg || m.recipient == arg)
+                    .chain(
+                        members
+                            .iter()
+                            .filter(|m| m.recipient.starts_with(arg) && arg.len() >= 8),
+                    )
+                    .collect();
+                let m = match found.as_slice() {
+                    [] => bail!("no member {arg:?} (see :tabmembers)"),
+                    [m, rest @ ..] if rest.iter().all(|r| r.recipient == m.recipient) => (*m).clone(),
+                    _ => bail!("several members match {arg:?}: use their key"),
+                };
+                if members.len() == 1 {
+                    bail!("{} is the last member", m.name);
+                }
+                self.repo.set_member(tab, &m.recipient, None)?;
+                self.refresh()?;
+                self.requests.push(Request::Sync);
+                self.info(format!(
+                    "removed {}: a new key is made at the next sync (also stop sharing the remote folder with them)",
+                    m.name
+                ));
+            }
+            "tabmembers" => {
+                let tab = self.tab_id()?;
+                let mine = self.identity.as_ref().map(|i| i.recipient().to_owned());
+                let members: Vec<String> = self
+                    .repo
+                    .members(tab)?
+                    .into_iter()
+                    .filter(|m| m.active)
+                    .map(|m| {
+                        let you = if mine.as_deref() == Some(&m.recipient) {
+                            ", you"
+                        } else {
+                            ""
+                        };
+                        format!("{} ({}{you})", m.name, short_key(&m.recipient))
+                    })
+                    .collect();
+                self.info(if members.is_empty() {
+                    "not shared (see :tabremote)".to_owned()
+                } else {
+                    format!("members: {}", members.join(", "))
+                });
+            }
+            "mykey" => {
+                let note = self.ensure_identity()?;
+                let me = self.me();
+                let key = me.recipient().to_owned();
+                let path = me.path().map(|p| p.display().to_string()).unwrap_or_default();
+                self.info(match note {
+                    Some(n) => format!("{n}; your key: {key}"),
+                    None => format!("your key: {key}  ({path})"),
+                });
             }
             "sync" => {
                 self.requests.push(Request::Sync);
@@ -865,6 +1002,37 @@ impl App {
             other => bail!("unknown command :{other} (see :help)"),
         }
         Ok(())
+    }
+}
+
+/// Split `KEY [NAME]`; an SSH key is two words (`ssh-ed25519 AAAA…`), and its
+/// comment, if any, is the default name.
+fn split_key(arg: &str) -> Option<(String, Option<String>)> {
+    let arg = arg.trim();
+    let n = if arg.starts_with("ssh-") { 2 } else { 1 };
+    let words: Vec<&str> = arg.splitn(n + 1, char::is_whitespace).collect();
+    if words.len() < n || words[0].is_empty() {
+        return None;
+    }
+    let key = words[..n].join(" ");
+    let name = words.get(n).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    Some((key, name))
+}
+
+/// `age1qyz…k3x9`, `ssh-ed25519 …AbCd`.
+pub fn short_key(key: &str) -> String {
+    match key.split_once(' ') {
+        Some((kind, b64)) => format!("{kind} …{}", &b64[b64.len().saturating_sub(8)..]),
+        None if key.len() > 16 => format!("{}…{}", &key[..8], &key[key.len() - 4..]),
+        None => key.to_owned(),
+    }
+}
+
+/// A remote as typed in `:tabjoin`.
+fn remote_spec(r: &RemoteConfig) -> String {
+    match r {
+        RemoteConfig::LocalDir { path } => path.clone(),
+        RemoteConfig::GDrive { .. } => r.to_string(),
     }
 }
 

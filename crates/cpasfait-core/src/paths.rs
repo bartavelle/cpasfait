@@ -22,3 +22,29 @@ pub fn default_db_path() -> PathBuf {
 pub fn gdrive_credentials_path() -> PathBuf {
     data_dir().join("gdrive.json")
 }
+
+/// `<data dir>/identity.txt`: the age identity cpasfait creates when there is none.
+pub fn own_identity_path() -> PathBuf {
+    data_dir().join("identity.txt")
+}
+
+/// The identity (secret key) used to read shared tabs, first found of:
+/// `$CPASFAIT_IDENTITY` (an age identity file or an unencrypted SSH private
+/// key), `<data dir>/identity.txt`, and, unless `$CPASFAIT_DATA_DIR` is set,
+/// age's usual `~/.config/age/keys.txt`.
+pub fn identity_path() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("CPASFAIT_IDENTITY") {
+        return Some(PathBuf::from(p));
+    }
+    let own = own_identity_path();
+    if own.exists() {
+        return Some(own);
+    }
+    if std::env::var_os("CPASFAIT_DATA_DIR").is_none() {
+        let age = directories::BaseDirs::new()?.config_dir().join("age").join("keys.txt");
+        if age.exists() {
+            return Some(age);
+        }
+    }
+    None
+}

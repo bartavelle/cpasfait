@@ -4,10 +4,11 @@ use crate::apply::{apply_op, apply_to_model};
 use crate::error::{Error, Result};
 use crate::hlc::{ClockState, Hlc};
 use crate::ids::{DeviceId, SessionId, TabId, TaskId};
-use crate::model::{DepInfo, DepState, Dependencies, RemoteConfig, Session, TabInfo, Task};
+use crate::model::{DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, Session, TabInfo, Task};
 use crate::op::{Change, Entity, Op, Status};
 use crate::position::key_between;
 use crate::schema;
+use crate::sync::KeyFile;
 use crate::tree::Tree;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 use std::path::Path;
@@ -222,6 +223,12 @@ impl Repo {
 
     /// Changes whenever another connection (process, sync thread) commits to the
     /// database: cheap way to know when to refresh.
+    /// Rows written through this connection so far: changes when this
+    /// process edits (unlike [`Repo::data_version`]).
+    pub fn local_changes(&self) -> u64 {
+        self.conn.total_changes()
+    }
+
     pub fn data_version(&self) -> Result<i64> {
         Ok(self.conn.pragma_query_value(None, "data_version", |r| r.get(0))?)
     }
@@ -311,6 +318,159 @@ impl Repo {
         if n == 0 {
             return Err(Error::NotFound(format!("tab {tab}")));
         }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------- sharing
+
+    /// Members of a shared tab, including removed ones.
+    pub fn members(&self, tab: TabId) -> Result<Vec<Member>> {
+        let mut st = self.conn.prepare(
+            "SELECT m.recipient, m.name, f.hlc_wall, f.hlc_counter, f.device
+             FROM tab_member m JOIN field_hlc f ON f.entity = m.tab AND f.field = 'tab.member:' || m.recipient
+             WHERE m.tab = ?1 ORDER BY m.name IS NULL, lower(m.name), m.recipient",
+        )?;
+        let rows = st.query_map(params![tab.to_string()], |r| {
+            let name: Option<String> = r.get(1)?;
+            Ok(Member {
+                recipient: r.get(0)?,
+                active: name.is_some(),
+                name: name.unwrap_or_default(),
+                hlc: Hlc {
+                    wall: r.get(2)?,
+                    counter: r.get(3)?,
+                    device: parse_id(&r.get::<_, String>(4)?)?,
+                },
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Add (`Some(name)`) or remove (`None`) a member of a shared tab. Keys are
+    /// distributed, and rotated after a removal, by the next sync.
+    pub fn set_member(&mut self, tab: TabId, recipient: &str, name: Option<&str>) -> Result<()> {
+        let recipient = crate::crypto::parse_recipient(recipient)?;
+        self.edit1(
+            tab,
+            tab,
+            Change::TabMember {
+                recipient,
+                name: name.map(str::to_owned),
+            },
+        )
+    }
+
+    /// The encryption keys of a tab this device holds.
+    pub fn epochs(&self, tab: TabId) -> Result<Vec<Epoch>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT epoch, key, prev, depth FROM tab_epoch WHERE tab = ?1 ORDER BY depth, epoch")?;
+        let rows = st.query_map(params![tab.to_string()], |r| {
+            let key: Vec<u8> = r.get(1)?;
+            Ok(Epoch {
+                id: parse_id(&r.get::<_, String>(0)?)?,
+                key: key.try_into().map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Blob, "key size".into())
+                })?,
+                prev: opt_id(r.get(2)?)?,
+                depth: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub(crate) fn add_epoch(&mut self, tab: TabId, e: &Epoch) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO tab_epoch(tab, epoch, key, prev, depth) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                tab.to_string(),
+                e.id.to_string(),
+                &e.key[..],
+                e.prev.map(|p| p.to_string()),
+                e.depth
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The epoch new data is encrypted with: the latest one (longest chain,
+    /// then highest id, so concurrent rotations agree).
+    pub fn write_epoch(&self, tab: TabId) -> Result<Option<Epoch>> {
+        Ok(self.epochs(tab)?.into_iter().max_by_key(|e| (e.depth, e.id)))
+    }
+
+    /// Prepare a tab for sharing: `me` (this user's public key) becomes a
+    /// member and the first key is created, unless the tab already has one.
+    pub fn share_tab(&mut self, tab: TabId, me: &str) -> Result<()> {
+        let me = crate::crypto::parse_recipient(me)?;
+        if !self.epochs(tab)?.is_empty() {
+            return Ok(());
+        }
+        if !self.members(tab)?.iter().any(|m| m.active && m.recipient == me) {
+            let user = self.user.clone();
+            self.set_member(tab, &me, Some(&user))?;
+        }
+        self.add_epoch(
+            tab,
+            &Epoch {
+                id: Uuid::now_v7(),
+                key: crate::crypto::random_key(),
+                prev: None,
+                depth: 0,
+            },
+        )
+    }
+
+    /// Remote key files already examined, by path.
+    pub(crate) fn key_files(&self, tab: TabId) -> Result<std::collections::HashMap<String, KeyFile>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT path, status, epoch, recipients, exclude FROM key_file WHERE tab = ?1")?;
+        let rows = st.query_map(params![tab.to_string()], |r| {
+            let path: String = r.get(0)?;
+            let status: String = r.get(1)?;
+            let epoch: Option<String> = r.get(2)?;
+            let recipients: Option<String> = r.get(3)?;
+            let exclude: Option<String> = r.get(4)?;
+            Ok((path, status, epoch, recipients, exclude))
+        })?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let (path, status, epoch, recipients, exclude) = row?;
+            let kf = match (status.as_str(), epoch) {
+                ("valid", Some(epoch)) => KeyFile::Valid {
+                    epoch: parse_id(&epoch)?,
+                    recipients: serde_json::from_str(recipients.as_deref().unwrap_or("[]"))?,
+                    exclude: serde_json::from_str(exclude.as_deref().unwrap_or("[]"))?,
+                },
+                ("foreign", _) => KeyFile::Foreign,
+                _ => KeyFile::Invalid,
+            };
+            out.insert(path, kf);
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn record_key_file(&mut self, tab: TabId, path: &str, kf: &KeyFile) -> Result<()> {
+        let (status, epoch, recipients, exclude) = match kf {
+            KeyFile::Valid {
+                epoch,
+                recipients,
+                exclude,
+            } => (
+                "valid",
+                Some(epoch.to_string()),
+                Some(serde_json::to_string(recipients)?),
+                Some(serde_json::to_string(exclude)?),
+            ),
+            KeyFile::Foreign => ("foreign", None, None, None),
+            KeyFile::Invalid => ("invalid", None, None, None),
+        };
+        self.conn.execute(
+            "INSERT OR REPLACE INTO key_file(tab, path, status, epoch, recipients, exclude)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![tab.to_string(), path, status, epoch, recipients, exclude],
+        )?;
         Ok(())
     }
 
@@ -974,6 +1134,7 @@ impl Repo {
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(
             "DELETE FROM field_hlc; DELETE FROM task; DELETE FROM task_tag; DELETE FROM task_dep; DELETE FROM session;
+             DELETE FROM tab_member;
              UPDATE tab SET name = '', deleted = 0;",
         )?;
         for op in &ops {
@@ -994,6 +1155,7 @@ impl Repo {
             ),
             ("SELECT task, tag FROM task_tag ORDER BY task, tag", 2),
             ("SELECT task, blocker FROM task_dep ORDER BY task, blocker", 2),
+            ("SELECT tab, recipient, name FROM tab_member ORDER BY tab, recipient", 3),
             (
                 "SELECT id, tab, task, device, user, start, end, note, deleted FROM session ORDER BY id",
                 9,

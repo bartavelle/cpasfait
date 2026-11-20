@@ -16,6 +16,11 @@ pub enum Error {
     AlreadyExists(String),
     #[error("remote backend error: {0}")]
     Backend(String),
+    #[error("encryption: {0}")]
+    Crypto(String),
+    /// This device has no key for a shared tab (the payload is its public key).
+    #[error("no key for this tab yet: ask a member to run `:tabinvite {0}`")]
+    NotInvited(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

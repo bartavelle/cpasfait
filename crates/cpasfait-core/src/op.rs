@@ -49,6 +49,12 @@ impl Status {
 pub enum Change {
     TabName(String),
     TabDeleted(bool),
+    /// A member of a shared tab, by public key (see [`crate::crypto::parse_recipient`]).
+    /// Wire value: the member's display name, or `false` once removed.
+    TabMember {
+        recipient: String,
+        name: Option<String>,
+    },
 
     TaskTitle(String),
     TaskNotes(String),
@@ -92,12 +98,13 @@ pub enum EntityKind {
 
 const TAG_PREFIX: &str = "task.tag:";
 const BLOCKED_BY_PREFIX: &str = "task.blocked_by:";
+pub(crate) const MEMBER_PREFIX: &str = "tab.member:";
 
 impl Change {
     pub fn kind(&self) -> EntityKind {
         use Change::*;
         match self {
-            TabName(_) | TabDeleted(_) => EntityKind::Tab,
+            TabName(_) | TabDeleted(_) | TabMember { .. } => EntityKind::Tab,
             TaskTitle(_)
             | TaskNotes(_)
             | TaskStatus(_)
@@ -119,6 +126,7 @@ impl Change {
         match self {
             TabName(_) => "tab.name".into(),
             TabDeleted(_) => "tab.deleted".into(),
+            TabMember { recipient, .. } => format!("{MEMBER_PREFIX}{recipient}"),
             TaskTitle(_) => "task.title".into(),
             TaskNotes(_) => "task.notes".into(),
             TaskStatus(_) => "task.status".into(),
@@ -145,6 +153,8 @@ impl Change {
             TabName(s) | TaskTitle(s) | TaskNotes(s) | TaskPosition(s) | SessionUser(s) | SessionNote(s) => json!(s),
             TabDeleted(b) | TaskDeleted(b) | SessionDeleted(b) => json!(b),
             TaskTag { on, .. } => json!(on),
+            TabMember { name: Some(n), .. } => json!(n),
+            TabMember { name: None, .. } => json!(false),
             TaskBlockedBy { on: false, .. } => json!(false),
             TaskBlockedBy { tab: None, .. } => json!(true),
             TaskBlockedBy { tab: Some(tab), .. } => json!(tab.0.to_string()),
@@ -179,6 +189,16 @@ impl Change {
             return Some(TaskTag {
                 tag: tag.to_owned(),
                 on: b()?,
+            });
+        }
+        if let Some(recipient) = field.strip_prefix(MEMBER_PREFIX) {
+            return Some(TabMember {
+                recipient: recipient.to_owned(),
+                name: match value {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Bool(false) => None,
+                    _ => return None,
+                },
             });
         }
         if let Some(task) = field.strip_prefix(BLOCKED_BY_PREFIX) {
@@ -258,6 +278,14 @@ mod tests {
             },
             Change::TaskDue(Some(jiff::civil::date(2026, 12, 1))),
             Change::TaskDue(None),
+            Change::TabMember {
+                recipient: "age1xyz".into(),
+                name: Some("bob".into()),
+            },
+            Change::TabMember {
+                recipient: "ssh-ed25519 AAAA".into(),
+                name: None,
+            },
             Change::TaskBlockedBy {
                 task: TaskId::new(),
                 tab: None,

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -100,6 +100,40 @@ CREATE INDEX task_dep_blocker ON task_dep(blocker);
 /// The blocker's tab (dependencies may cross tabs).
 const SCHEMA_V3: &str = "ALTER TABLE task_dep ADD COLUMN blocker_tab TEXT;";
 
+/// Encryption of shared tabs.
+const SCHEMA_V4: &str = r#"
+-- Read model: members of shared tabs (name NULL = removed).
+CREATE TABLE tab_member(
+    tab TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    name TEXT,
+    PRIMARY KEY(tab, recipient)
+) WITHOUT ROWID;
+
+-- Local only (not rebuilt from ops): the epoch keys this device holds.
+CREATE TABLE tab_epoch(
+    tab TEXT NOT NULL,
+    epoch TEXT NOT NULL,
+    key BLOB NOT NULL,
+    prev TEXT,
+    depth INTEGER NOT NULL,
+    PRIMARY KEY(tab, epoch)
+) WITHOUT ROWID;
+
+-- Local only: remote key files already examined (so they are downloaded once).
+-- status: 'valid' (then epoch/recipients/exclude are set), 'foreign' (not
+-- encrypted to us), 'invalid'.
+CREATE TABLE key_file(
+    tab TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status TEXT NOT NULL,
+    epoch TEXT,
+    recipients TEXT,
+    exclude TEXT,
+    PRIMARY KEY(tab, path)
+) WITHOUT ROWID;
+"#;
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -116,6 +150,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 3 {
         tx.execute_batch(SCHEMA_V3)?;
+    }
+    if version < 4 {
+        tx.execute_batch(SCHEMA_V4)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

@@ -11,7 +11,7 @@ Goal: a Rust TUI todo app with:
 
 ### Remote backend: answering "does Google offer something with this property? is DAV enough?"
 The key design choice is to **make the remote need no concurrency guarantees at all**: every device only ever
-*creates new immutable files with unique names* (`ops/<device-id>/<segment>.jsonl`) and never overwrites or
+*creates new immutable files with unique names* (`ops/<device-id>/<segment>.seg`) and never overwrites or
 appends to anything shared. Merging happens client-side (op-log + LWW). So the backend only needs
 `list(prefix)`, `get(path)`, `put_new(path, bytes)` — no compare-and-swap, no locking.
 - **Google Drive** satisfies this (REST v3: create file in a folder, list children, download). Caveats: Drive does
@@ -93,7 +93,7 @@ Both read the local DB only (no network by default; `--sync` opt-in), output pla
   (`Repo::time_report(range, filters)`) so the TUI/mobile can reuse it.
 
 ### Sync
-Remote layout per tab: `<root>/<tab_id>/ops/<device_id>/<first_seq>-<last_seq>.jsonl` (immutable segments; spec in `docs/format.md`).
+Remote layout per tab: `<root>/<tab_id>/ops/<device_id>/<first_seq>-<last_seq>.seg` (immutable, encrypted segments) and `<root>/<tab_id>/keys/<epoch>/…age` (epoch keys, age-encrypted to the members); spec in `docs/format.md`.
 - **push**: unpushed local ops → one new segment file via `put_new` (local-dir: write temp + rename) → mark pushed.
 - **pull**: `list` device dirs/segments, fetch segments newer than cursor, insert ops (dedupe by HLC key), advance HLC, re-materialize.
 - Triggers: startup, every 60 s, 3 s after a local edit, `:sync`, and on exit. Background thread with its own DB
@@ -152,6 +152,12 @@ Known limitations / next steps:
   HTTP server, not yet against the real Drive. Shared folders need the full `drive` scope: with `drive.file` a user
   cannot see a folder that another account created. While the OAuth client's consent screen is in "Testing"
   status, Google expires refresh tokens after 7 days. `cpasfait-gdrive` handles login, mkdir and share.
+- Remote data is always end-to-end encrypted (`crypto.rs`, key handling in `sync.rs`; spec in `format.md`):
+  per-tab epoch keys sealing segments with XChaCha20-Poly1305, distributed as age files to the members' age or SSH
+  public keys, rotated when a member is removed, and chained by HMAC so the remote cannot inject a key. Members are
+  `tab.member:<key>` LWW ops. Not supported yet: passphrase-protected identities and age plugins (unwrapping happens in
+  the background sync thread, which cannot prompt); a member removed but still allowed to write to the remote can still
+  add segments under old keys.
 - WebDAV backend still to do. `RemoteBackend` is the extension point.
 - No compaction of op logs yet.
 - A segment that never arrives (for example, deleted on the remote) blocks that device's later ops for that tab.

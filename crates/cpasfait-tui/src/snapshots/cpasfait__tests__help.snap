@@ -4,8 +4,7 @@ expression: "screen(&mut app, 100, 30)"
 ---
  1:inbox                                                                                      alice
  inbox                                                     │ details
-▶ ▾ [ ] Project  ⏱                                         │Project
-      ┌ help ────────────────────────────────────────────────────────────────────────────────┐
+▶ ▾ [ ┌ help ────────────────────────────────────────────────────────────────────────────────┐
       │Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page                   │
       │              h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold            │
       │              gt/gT    next/prev tab (also Alt-→/Alt-←) 1-9    go to tab              │
@@ -26,9 +25,10 @@ expression: "screen(&mut app, 100, 30)"
       │              :tabnew NAME   :tabrename NAME   :tabclose!   :sync                     │
       │              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild   :q       │
       │              REMOTE = a directory, or gdrive:FOLDER-ID (see cpasfait-gdrive)         │
+      │Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME       │
+      │              :tabmembers   (remote data is encrypted to the members' age/SSH keys)   │
       │Press any key to close this help.                                                     │
       └──────────────────────────────────────────────────────────────────────────────────────┘
-                                                           │
                                                            │
                                                            │
  NORMAL                                                                           ⏱ Project 0:00:00

@@ -10,6 +10,8 @@ use std::time::Duration;
 pub struct SyncReport {
     pub pulled: usize,
     pub pushed: usize,
+    /// Changes that need a key this device does not have yet.
+    pub waiting_for_key: usize,
     pub errors: Vec<String>,
 }
 
@@ -29,6 +31,7 @@ impl SyncWorker {
                     let _ = result_tx.send(SyncReport {
                         pulled: 0,
                         pushed: 0,
+                        waiting_for_key: 0,
                         errors: vec![e.to_string()],
                     });
                     return;
@@ -59,6 +62,7 @@ pub fn run_once(repo: &mut Repo) -> SyncReport {
     let mut report = SyncReport {
         pulled: 0,
         pushed: 0,
+        waiting_for_key: 0,
         errors: vec![],
     };
     match sync_all(repo) {
@@ -68,6 +72,7 @@ pub fn run_once(repo: &mut Repo) -> SyncReport {
                     Ok(s) => {
                         report.pulled += s.pulled;
                         report.pushed += s.pushed;
+                        report.waiting_for_key += s.waiting_for_key;
                     }
                     Err(e) => report.errors.push(format!("tab {tab}: {e}")),
                 }
