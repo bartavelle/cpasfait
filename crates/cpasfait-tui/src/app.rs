@@ -67,6 +67,8 @@ pub struct App {
     pub open_sessions: Vec<Session>,
     /// Sessions of the selected task.
     pub detail_sessions: Vec<Session>,
+    /// Requirements of the selected task and what it blocks.
+    pub detail_deps: cpasfait_core::Dependencies,
     pub next: Option<TaskId>,
     pub sync_status: Option<String>,
     pub requests: Vec<Request>,
@@ -100,6 +102,7 @@ impl App {
             active: None,
             open_sessions: vec![],
             detail_sessions: vec![],
+            detail_deps: Default::default(),
             next: None,
             sync_status: None,
             requests: vec![],
@@ -203,6 +206,10 @@ impl App {
         self.detail_sessions = self
             .selected()
             .map(|t| self.repo.sessions_for_task(t).unwrap_or_default())
+            .unwrap_or_default();
+        self.detail_deps = self
+            .selected()
+            .and_then(|t| self.repo.dependencies(t).ok())
             .unwrap_or_default();
     }
 

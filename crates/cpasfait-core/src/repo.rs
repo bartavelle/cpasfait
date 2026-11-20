@@ -4,7 +4,7 @@ use crate::apply::{apply_op, apply_to_model};
 use crate::error::{Error, Result};
 use crate::hlc::{ClockState, Hlc};
 use crate::ids::{DeviceId, SessionId, TabId, TaskId};
-use crate::model::{RemoteConfig, Session, TabInfo, Task};
+use crate::model::{DepInfo, DepState, Dependencies, RemoteConfig, Session, TabInfo, Task};
 use crate::op::{Change, Entity, Op, Status};
 use crate::position::key_between;
 use crate::schema;
@@ -489,28 +489,128 @@ impl Repo {
         )
     }
 
-    /// Make `task` require `blocker` (or remove that requirement). Refuses
-    /// links across tabs, to itself, to its own ancestors (it could never
-    /// become actionable) and links that would close a cycle.
+    /// Make `task` require `blocker` (or remove that requirement). The
+    /// blocker may be in another tab. Refuses links to itself, to its own
+    /// ancestors (it could never become actionable) and links that would
+    /// close a cycle.
     pub fn set_blocked_by(&mut self, task: TaskId, blocker: TaskId, on: bool) -> Result<()> {
+        let mut tab = None;
         if on {
             let t = self.task(task)?;
             let b = self.task(blocker)?;
-            if t.tab != b.tab {
-                return Err(Error::Invalid("dependencies must stay within a tab".into()));
-            }
             if task == blocker {
                 return Err(Error::Invalid("a task cannot require itself".into()));
             }
-            let tree = self.structure(t.tab)?;
-            if tree.ancestors(task).contains(&blocker) {
+            if t.tab == b.tab && self.structure(t.tab)?.ancestors(task).contains(&blocker) {
                 return Err(Error::Invalid("a task cannot require one of its parents".into()));
             }
-            if tree.requires_transitively(blocker, task) {
+            if self.requires_transitively(blocker, task)? {
                 return Err(Error::Invalid("that would create a dependency cycle".into()));
             }
+            tab = Some(b.tab);
         }
-        self.set_task(task, Change::TaskBlockedBy { task: blocker, on })
+        self.set_task(task, Change::TaskBlockedBy { task: blocker, tab, on })
+    }
+
+    /// Does `from` require `to`, directly or transitively (across tabs)?
+    pub fn requires_transitively(&self, from: TaskId, to: TaskId) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "WITH RECURSIVE r(id) AS (SELECT ?1 UNION SELECT d.blocker FROM task_dep d JOIN r ON d.task = r.id)
+             SELECT EXISTS(SELECT 1 FROM r WHERE id = ?2)",
+            params![from.to_string(), to.to_string()],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Whether a task is done, looking at it and its ancestors: `None` when
+    /// it is unknown, deleted, or under a deleted ancestor.
+    pub fn task_done(&self, id: TaskId) -> Result<Option<bool>> {
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT status, deleted, parent FROM task WHERE id = ?1")?;
+        let mut cur = Some(id.to_string());
+        let mut done = false;
+        for _ in 0..1000 {
+            let Some(c) = cur.take() else { break };
+            let row: Option<(String, bool, Option<String>)> = st
+                .query_row(params![c], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .optional()?;
+            match row {
+                None if c == id.to_string() => return Ok(None),
+                None => break, // unknown parent: shown at the root
+                Some((_, true, _)) => return Ok(None),
+                Some((status, false, parent)) => {
+                    done |= status == "done";
+                    cur = parent;
+                }
+            }
+        }
+        Ok(Some(done))
+    }
+
+    /// Record the state of blockers that live outside `tree` (other tabs).
+    fn fill_external(&self, tree: &mut Tree) -> Result<()> {
+        let outside: std::collections::BTreeSet<TaskId> = tree
+            .iter()
+            .flat_map(|t| t.blocked_by.iter().copied())
+            .filter(|b| !tree.contains(*b))
+            .collect();
+        let mut m = std::collections::HashMap::new();
+        for b in outside {
+            if let Some(done) = self.task_done(b)? {
+                m.insert(b, done);
+            }
+        }
+        tree.set_external(m);
+        Ok(())
+    }
+
+    /// What `task` requires and what requires it, for display.
+    pub fn dependencies(&self, task: TaskId) -> Result<Dependencies> {
+        let tabs: std::collections::HashMap<TabId, String> = self.tabs()?.into_iter().map(|t| (t.id, t.name)).collect();
+        let info = |id: TaskId, tab: Option<TabId>| -> Result<DepInfo> {
+            let known = self.task(id).ok();
+            let tab = known.as_ref().map(|t| t.tab).or(tab);
+            let tab_name = tab.and_then(|t| tabs.get(&t).cloned());
+            let state = match (&known, self.task_done(id)?) {
+                (Some(_), Some(true)) => DepState::Done,
+                (Some(_), Some(false)) => DepState::Todo,
+                (Some(_), None) => DepState::Deleted,
+                (None, _) if tab_name.is_some() => DepState::Missing,
+                (None, _) => DepState::UnknownTab,
+            };
+            Ok(DepInfo {
+                task: id,
+                tab,
+                tab_name,
+                title: known.map(|t| t.title),
+                state,
+            })
+        };
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT blocker, blocker_tab FROM task_dep WHERE task = ?1 ORDER BY blocker")?;
+        let reqs: Vec<(String, Option<String>)> = st
+            .query_map(params![task.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut requires = vec![];
+        for (b, tab) in reqs {
+            requires.push(info(parse_id(&b)?, opt_id(tab)?)?);
+        }
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT task FROM task_dep WHERE blocker = ?1 ORDER BY task")?;
+        let ids: Vec<String> = st
+            .query_map(params![task.to_string()], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut blocks = vec![];
+        for id in ids {
+            let d = info(parse_id(&id)?, None)?;
+            if d.state != DepState::Deleted {
+                blocks.push(d);
+            }
+        }
+        Ok(Dependencies { requires, blocks })
     }
 
     pub fn delete_task(&mut self, task: TaskId) -> Result<()> {
@@ -704,7 +804,9 @@ impl Repo {
     }
 
     pub fn tree(&self, tab: TabId) -> Result<Tree> {
-        Ok(Tree::build(self.tasks(tab)?))
+        let mut tree = Tree::build(self.tasks(tab)?);
+        self.fill_external(&mut tree)?;
+        Ok(tree)
     }
 
     /// The most prioritary actionable task of a tab (see [`Tree::next_task`]).
@@ -740,7 +842,9 @@ impl Repo {
                 blocked_by: id_list(r.get(7)?)?,
             })
         })?;
-        Ok(Tree::build(rows.collect::<rusqlite::Result<_>>()?))
+        let mut tree = Tree::build(rows.collect::<rusqlite::Result<_>>()?);
+        self.fill_external(&mut tree)?;
+        Ok(tree)
     }
 
     // ----------------------------------------------------------------- sync

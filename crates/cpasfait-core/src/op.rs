@@ -64,8 +64,11 @@ pub enum Change {
     },
     TaskDeleted(bool),
     /// `task` must be done before this one ("blocked by" / "requires").
+    /// `tab` is the blocker's tab (it may be one this device does not have).
+    /// Wire value: the tab id when on (`true` if unknown), `false` when off.
     TaskBlockedBy {
         task: TaskId,
+        tab: Option<TabId>,
         on: bool,
     },
 
@@ -141,7 +144,10 @@ impl Change {
         match self {
             TabName(s) | TaskTitle(s) | TaskNotes(s) | TaskPosition(s) | SessionUser(s) | SessionNote(s) => json!(s),
             TabDeleted(b) | TaskDeleted(b) | SessionDeleted(b) => json!(b),
-            TaskTag { on, .. } | TaskBlockedBy { on, .. } => json!(on),
+            TaskTag { on, .. } => json!(on),
+            TaskBlockedBy { on: false, .. } => json!(false),
+            TaskBlockedBy { tab: None, .. } => json!(true),
+            TaskBlockedBy { tab: Some(tab), .. } => json!(tab.0.to_string()),
             TaskStatus(s) => json!(s.as_str()),
             TaskPriority(p) => json!(p),
             TaskDue(d) => match d {
@@ -176,9 +182,19 @@ impl Change {
             });
         }
         if let Some(task) = field.strip_prefix(BLOCKED_BY_PREFIX) {
-            return Some(TaskBlockedBy {
-                task: task.parse().ok()?,
-                on: b()?,
+            let task = task.parse().ok()?;
+            return Some(match value {
+                Value::Bool(on) => TaskBlockedBy {
+                    task,
+                    tab: None,
+                    on: *on,
+                },
+                Value::String(s) => TaskBlockedBy {
+                    task,
+                    tab: Some(s.parse().ok()?),
+                    on: true,
+                },
+                _ => return None,
             });
         }
         Some(match field {
@@ -244,7 +260,18 @@ mod tests {
             Change::TaskDue(None),
             Change::TaskBlockedBy {
                 task: TaskId::new(),
+                tab: None,
                 on: false,
+            },
+            Change::TaskBlockedBy {
+                task: TaskId::new(),
+                tab: Some(TabId::new()),
+                on: true,
+            },
+            Change::TaskBlockedBy {
+                task: TaskId::new(),
+                tab: None,
+                on: true,
             },
             Change::TaskParent(Some(TaskId::new())),
             Change::TaskParent(None),

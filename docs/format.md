@@ -47,7 +47,7 @@ are ordered after them.
 | `task.parent` | task id \| null | null/absent = root |
 | `task.position` | string | fractional index among siblings, see below |
 | `task.tag:<name>` | bool | tag present or not; one register per tag |
-| `task.blocked_by:<task id>` | bool | this task requires that one (same tab); one register per pair |
+| `task.blocked_by:<task id>` | tab id \| `true` \| `false` | this task requires that one; the value is the required task's tab (it may be in another tab, `true` = tab unknown), `false` removes the link; one register per pair |
 | `task.deleted` | bool | tombstone; hides the subtree |
 | `session.task` | task id | work session → task |
 | `session.device` | device id | the device that runs the timer |
@@ -72,7 +72,9 @@ An entity exists as soon as any op targets it. Missing fields take their default
 
 ### Dependency rules
 
-- A requirement on a task that is deleted or unknown locally is ignored.
+- Requirements may cross tabs. A requirement on a task that is deleted, or
+  unknown locally (its tab is not shared with this device, or not synced
+  yet), does not block; clients should show it as a problem.
 - A task is blocked while any of its requirements is not done (a task under
   a done parent counts as done). Blocked tasks are never the "next task".
 - Clients refuse to create self-requirements, requirements on an ancestor,

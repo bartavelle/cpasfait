@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -97,6 +97,9 @@ CREATE TABLE task_dep(task TEXT NOT NULL, blocker TEXT NOT NULL, PRIMARY KEY(tas
 CREATE INDEX task_dep_blocker ON task_dep(blocker);
 "#;
 
+/// The blocker's tab (dependencies may cross tabs).
+const SCHEMA_V3: &str = "ALTER TABLE task_dep ADD COLUMN blocker_tab TEXT;";
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -110,6 +113,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 2 {
         tx.execute_batch(SCHEMA_V2)?;
+    }
+    if version < 3 {
+        tx.execute_batch(SCHEMA_V3)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

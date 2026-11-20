@@ -25,6 +25,9 @@ pub struct Tree {
     parent: Vec<Option<usize>>,
     children: Vec<Vec<TaskId>>,
     roots: Vec<TaskId>,
+    /// Done-state of required tasks outside this tree (other tabs). Absent =
+    /// unknown or deleted: does not block.
+    external: HashMap<TaskId, bool>,
 }
 
 const NONE: usize = usize::MAX;
@@ -112,6 +115,7 @@ impl Tree {
             parent,
             children,
             roots,
+            external: HashMap::new(),
         }
     }
 
@@ -222,6 +226,10 @@ impl Tree {
         out
     }
 
+    pub fn set_external(&mut self, done: HashMap<TaskId, bool>) {
+        self.external = done;
+    }
+
     /// Tasks of this tree that `id` requires (unknown and hidden ones left out).
     pub fn blockers(&self, id: TaskId) -> Vec<TaskId> {
         self.get(id)
@@ -247,9 +255,17 @@ impl Tree {
                 .any(|a| self.get(*a).is_some_and(|t| t.is_done()))
     }
 
-    /// Has a blocker that is not done yet.
+    /// Has a requirement (in this tab or another) that is not done yet.
     pub fn is_blocked(&self, id: TaskId) -> bool {
-        self.blockers(id).iter().any(|b| !self.is_effectively_done(*b))
+        self.get(id).is_some_and(|t| {
+            t.blocked_by.iter().any(|&b| {
+                if self.contains(b) {
+                    !self.is_effectively_done(b)
+                } else {
+                    self.external.get(&b) == Some(&false)
+                }
+            })
+        })
     }
 
     /// Does `from` require `to`, directly or through other requirements?
@@ -293,10 +309,10 @@ impl Tree {
             (std::cmp::Reverse(t.priority), t.due.is_none(), t.due, i)
         };
         let blocked = |i: usize| {
-            self.tasks[i]
-                .blocked_by
-                .iter()
-                .any(|b| self.index.get(b).is_some_and(|&j| active[j]))
+            self.tasks[i].blocked_by.iter().any(|b| match self.index.get(b) {
+                Some(&j) => active[j],
+                None => self.external.get(b) == Some(&false),
+            })
         };
         (0..n)
             .filter(|&i| active[i] && !open_child[i] && !blocked(i))

@@ -3,10 +3,11 @@
 use crate::app::{App, Mode};
 use crate::keymap::HELP;
 use crate::search::Search;
+use crate::search::short_id;
 use crate::timebox::{self, TimePeriod};
 use cpasfait_core::dates::today_local;
 use cpasfait_core::report::fmt_duration;
-use cpasfait_core::{Session, Task, TaskId};
+use cpasfait_core::{DepInfo, DepState, Session, Task};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -251,47 +252,65 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
-    let dep_line = |id: TaskId| {
-        let Some(d) = app.tree.get(id) else {
-            return Line::raw("");
+    let current_tab = app.tab().map(|t| t.id);
+    let dep_line = |d: &DepInfo| {
+        let (mark, st) = match d.state {
+            DepState::Done => ("✓ ", Style::new().fg(Color::Green)),
+            DepState::Todo => ("○ ", Style::new()),
+            DepState::Deleted => ("✗ ", Style::new().dim()),
+            DepState::Missing | DepState::UnknownTab => ("⚠ ", Style::new().fg(Color::Red)),
         };
-        let done = app.tree.is_effectively_done(id);
-        let (mark, st) = if done {
-            ("✓ ", Style::new().fg(Color::Green))
-        } else {
-            ("○ ", Style::new())
+        let title = match &d.title {
+            Some(t) if t.is_empty() => "(untitled)".to_owned(),
+            Some(t) => t.clone(),
+            None => format!("unknown task {}", short_id(d.task)),
         };
-        let title = if d.title.is_empty() {
-            "(untitled)".to_owned()
-        } else {
-            d.title.clone()
-        };
-        Line::from(vec![
+        let mut spans = vec![
             Span::raw("         "),
             Span::styled(mark, st),
-            Span::styled(title, if done { Style::new().dim() } else { Style::new() }),
-        ])
-    };
-    for (name, ids) in [
-        ("requires", app.tree.blockers(t.id)),
-        ("blocks", app.tree.blocking(t.id)),
-    ] {
-        if ids.is_empty() {
-            continue;
+            Span::styled(
+                title,
+                if d.state == DepState::Todo {
+                    Style::new()
+                } else {
+                    Style::new().dim()
+                },
+            ),
+        ];
+        if d.tab.is_some() && d.tab != current_tab {
+            let tab = match (&d.tab_name, d.tab) {
+                (Some(n), _) => n.clone(),
+                (None, Some(id)) => format!("tab {}", short_id(id)),
+                (None, None) => "?".into(),
+            };
+            spans.push(Span::raw(format!(" [{tab}]")).fg(Color::Blue));
         }
-        let mut first = dep_line(ids[0]);
-        first.spans[0] = label(name);
+        let mut out = vec![Line::from(spans)];
+        if let Some(p) = dep_problem(d.state) {
+            out.push(Line::from(vec![Span::raw("           "), Span::styled(p, st)]));
+        }
+        out
+    };
+    for (name, deps) in [
+        ("requires", &app.detail_deps.requires),
+        ("blocks", &app.detail_deps.blocks),
+    ] {
+        let Some((first, rest)) = deps.split_first() else {
+            continue;
+        };
+        let mut first = dep_line(first);
+        first[0].spans[0] = label(name);
         if name == "requires" && !t.is_done() {
-            let open = ids.iter().filter(|b| !app.tree.is_effectively_done(**b)).count();
+            let open = deps.iter().filter(|d| d.state == DepState::Todo).count();
             if open > 0 {
-                first.spans.push(Span::styled(
+                first[0].spans.push(Span::styled(
                     format!("   ⊘ {open} to do first"),
                     Style::new().fg(Color::Red),
                 ));
             }
         }
-        lines.push(first);
-        lines.extend(ids[1..].iter().map(|&id| dep_line(id)));
+        lines.extend(first);
+        lines.extend(rest.iter().flat_map(dep_line));
     }
     if app.next == Some(t.id) {
         lines.push(Line::from(Span::styled(
@@ -314,6 +333,16 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.push(session_line(s, now));
     }
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+/// Why a dependency cannot be checked, if it cannot.
+pub fn dep_problem(state: DepState) -> Option<&'static str> {
+    match state {
+        DepState::Todo | DepState::Done => None,
+        DepState::Deleted => Some("deleted"),
+        DepState::Missing => Some("not found (not synced yet?)"),
+        DepState::UnknownTab => Some("in a tab you don't have"),
+    }
 }
 
 fn session_line(s: &Session, now: i64) -> Line<'static> {

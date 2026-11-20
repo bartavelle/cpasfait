@@ -195,7 +195,10 @@ fn dependencies() {
     assert!(r.set_blocked_by(a, a, true).is_err());
     assert!(r.set_blocked_by(b, a, true).is_err(), "cycle");
     assert!(r.set_blocked_by(child, a, true).is_err(), "requires its parent");
-    assert!(r.set_blocked_by(a, elsewhere, true).is_err(), "other tab");
+    // other tabs are fine
+    r.set_blocked_by(a, elsewhere, true).unwrap();
+    assert!(r.set_blocked_by(elsewhere, a, true).is_err(), "cycle across tabs");
+    r.set_blocked_by(a, elsewhere, false).unwrap();
     r.set_blocked_by(a, b, false).unwrap();
     assert!(r.task(a).unwrap().blocked_by.is_empty());
     // removing is always allowed, even if never set
@@ -226,4 +229,55 @@ fn upgrade_from_v1_replays_dependency_ops() {
     // The read-only open used by the companion tools migrates too.
     let r = Repo::open_readonly(&path).unwrap();
     assert_eq!(r.task(a).unwrap().blocked_by, vec![b]);
+}
+
+#[test]
+fn dependencies_across_tabs() {
+    use cpasfait_core::DepState;
+    use cpasfait_core::backend::localdir::LocalDir;
+    use cpasfait_core::sync::sync_tab;
+    let mut r1 = Repo::open_in_memory().unwrap();
+    let work = r1.create_tab("work").unwrap();
+    let home = r1.create_tab("home").unwrap();
+    let report = r1.add_task(work, Place::LastChildOf(None), "report").unwrap();
+    let other = r1.add_task(work, Place::LastChildOf(None), "other").unwrap();
+    let car = r1.add_task(home, Place::LastChildOf(None), "fix car").unwrap();
+    r1.set_priority(report, 5).unwrap();
+    r1.set_blocked_by(report, car, true).unwrap();
+
+    assert!(r1.tree(work).unwrap().is_blocked(report));
+    assert_eq!(r1.next_task(work).unwrap().unwrap().id, other);
+    let d = r1.dependencies(report).unwrap();
+    assert_eq!(d.requires.len(), 1);
+    assert_eq!(d.requires[0].tab_name.as_deref(), Some("home"));
+    assert_eq!(d.requires[0].title.as_deref(), Some("fix car"));
+    assert_eq!(d.requires[0].state, DepState::Todo);
+    assert_eq!(r1.dependencies(car).unwrap().blocks[0].task, report);
+
+    r1.toggle_done(car).unwrap();
+    assert_eq!(r1.next_task(work).unwrap().unwrap().id, report);
+    assert_eq!(r1.dependencies(report).unwrap().requires[0].state, DepState::Done);
+    r1.toggle_done(car).unwrap();
+
+    // Another device that only shares "work" knows nothing about "home".
+    let remote = tempfile::tempdir().unwrap();
+    let backend = LocalDir::new(remote.path());
+    sync_tab(&mut r1, work, &backend).unwrap();
+    let mut r2 = Repo::open_in_memory().unwrap();
+    r2.add_known_tab(work).unwrap();
+    sync_tab(&mut r2, work, &backend).unwrap();
+    let d = r2.dependencies(report).unwrap();
+    assert_eq!(d.requires[0].state, DepState::UnknownTab);
+    assert_eq!(d.requires[0].tab, Some(home));
+    assert_eq!(d.requires[0].title, None);
+    // unknown requirements do not block
+    assert!(!r2.tree(work).unwrap().is_blocked(report));
+    // Once the tab is known but not synced yet, the task is "missing".
+    r2.add_known_tab(home).unwrap();
+    assert_eq!(r2.dependencies(report).unwrap().requires[0].state, DepState::Missing);
+
+    // Deleting the blocker unblocks.
+    r1.delete_task(car).unwrap();
+    assert_eq!(r1.dependencies(report).unwrap().requires[0].state, DepState::Deleted);
+    assert!(!r1.tree(work).unwrap().is_blocked(report));
 }

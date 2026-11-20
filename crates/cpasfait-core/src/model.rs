@@ -67,6 +67,38 @@ pub struct TabInfo {
     pub remote: Option<RemoteConfig>,
 }
 
+/// State of the other end of a dependency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DepState {
+    Todo,
+    Done,
+    /// Deleted (or under a deleted parent): no longer blocks.
+    Deleted,
+    /// In a tab this device has, but not here (not synced yet, or never existed).
+    Missing,
+    /// In a tab this device does not have.
+    UnknownTab,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DepInfo {
+    pub task: TaskId,
+    pub tab: Option<TabId>,
+    pub tab_name: Option<String>,
+    /// `None` when the task is not known here.
+    pub title: Option<String>,
+    pub state: DepState,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Dependencies {
+    /// Tasks this one requires.
+    pub requires: Vec<DepInfo>,
+    /// Tasks that require this one (only those known here).
+    pub blocks: Vec<DepInfo>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Task {
     pub id: TaskId,

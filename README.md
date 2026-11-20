@@ -35,7 +35,7 @@ Press `?` in the TUI for all keys. The essentials:
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
 - `T` shows time spent per task in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
-- `:require` / `:block` pick, in the finder, a task this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task
+- `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task
 
 ### Sharing a tab
 

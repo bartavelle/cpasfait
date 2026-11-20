@@ -107,12 +107,12 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
                 )?;
             }
         }
-        TaskBlockedBy { task, on } => {
+        TaskBlockedBy { task, tab, on } => {
             ensure_task()?;
             if on {
                 conn.execute(
-                    "INSERT OR IGNORE INTO task_dep(task, blocker) VALUES (?1, ?2)",
-                    params![entity, task.to_string()],
+                    "INSERT OR REPLACE INTO task_dep(task, blocker, blocker_tab) VALUES (?1, ?2, ?3)",
+                    params![entity, task.to_string(), tab.map(|t| t.to_string())],
                 )?;
             } else {
                 conn.execute(

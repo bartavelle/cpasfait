@@ -374,3 +374,72 @@ fn require_and_block_commands() {
     press(&mut app, ":unblock<enter><enter>");
     assert!(app.repo.task(invite).unwrap().blocked_by.is_empty());
 }
+
+#[test]
+fn dependencies_across_tabs_in_tui() {
+    use cpasfait_core::backend::localdir::LocalDir;
+    use cpasfait_core::sync::sync_tab;
+    let (mut app, _) = app();
+    press(&mut app, "oWrite report<enter>");
+    let report = app.selected().unwrap();
+    let work = app.tabs[app.tab_idx].id;
+    press(&mut app, ":tabnew Home<enter>oFix car<enter>");
+    let car = app.selected().unwrap();
+    // From Home: "Fix car" blocks a task of another tab.
+    press(&mut app, ":block report<enter>");
+    let Mode::Search(s) = &app.mode else { panic!() };
+    assert_eq!(s.hits.len(), 1);
+    press(&mut app, "<enter>");
+    assert_eq!(app.repo.task(report).unwrap().blocked_by, vec![car]);
+    press(&mut app, "gT");
+    assert!(app.tree.is_blocked(report));
+    app.detail_sessions.clear();
+    let s = screen(&mut app, 130, 12);
+    assert!(s.contains("requires ○ Fix car [Home]   ⊘ 1 to do first"), "{s}");
+    assert!(s.contains("⊘blocked"), "{s}");
+
+    // A device that only has the "inbox" tab sees an error instead.
+    let remote = tempfile::tempdir().unwrap();
+    let backend = LocalDir::new(remote.path());
+    sync_tab(&mut app.repo, work, &backend).unwrap();
+    let (mut other, _) = app_with_tab(work, &backend);
+    other.detail_sessions.clear();
+    let tab = app.tabs.iter().find(|t| t.name == "Home").unwrap().id;
+    let s = screen(&mut other, 160, 14);
+    let short = |s: String| s[s.len() - 8..].to_owned();
+    assert!(
+        s.contains(&format!(
+            "requires ⚠ unknown task …{} [tab …{}]",
+            short(car.to_string()),
+            short(tab.to_string())
+        )),
+        "{s}"
+    );
+    assert!(s.contains("           in a tab you don't have"), "{s}");
+    assert!(!s.contains("⊘blocked"), "unknown requirements do not block: {s}");
+    // ... and can still remove the link.
+    press(&mut other, ":unrequire<enter><enter>");
+    assert!(other.repo.task(report).unwrap().blocked_by.is_empty());
+}
+
+/// A second device that joined `tab` through `backend`.
+fn app_with_tab(
+    tab: cpasfait_core::TabId,
+    backend: &dyn cpasfait_core::backend::RemoteBackend,
+) -> (App, Arc<AtomicI64>) {
+    let time = Arc::new(AtomicI64::new(1_700_000_000_000));
+    let mut repo = Repo::open_in_memory().unwrap();
+    let t = time.clone();
+    repo.set_now(move || t.load(Ordering::SeqCst));
+    repo.set_user("bob").unwrap();
+    repo.add_known_tab(tab).unwrap();
+    cpasfait_core::sync::sync_tab(&mut repo, tab, backend).unwrap();
+    let mut app = App::new(repo).unwrap();
+    let i = app.tabs.iter().position(|t| t.id == tab).unwrap();
+    app.tab_idx = i;
+    app.refresh().unwrap();
+    app.list.select(Some(0));
+    app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+    app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+    (app, time)
+}

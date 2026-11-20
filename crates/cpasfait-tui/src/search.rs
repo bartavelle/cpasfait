@@ -6,6 +6,13 @@ use cpasfait_core::{Repo, TabId, TaskId};
 
 pub const MAX_RESULTS: usize = 50;
 
+/// `…` and the last 8 characters of an id, for display (UUIDv7 ids start
+/// with a timestamp, so their beginnings look alike).
+pub fn short_id(id: impl std::fmt::Display) -> String {
+    let s = id.to_string();
+    format!("…{}", &s[s.len().saturating_sub(8)..])
+}
+
 #[derive(Clone, Debug)]
 pub struct Candidate {
     pub id: TaskId,
@@ -53,47 +60,42 @@ pub struct Search {
 }
 
 impl Search {
-    /// For [`Purpose::Go`]: all visible tasks of all tabs, current tab first,
-    /// in tree order. Dependencies stay within the current tab.
+    /// All visible tasks of all tabs, current tab first, in tree order. For
+    /// [`Purpose::Unrequire`] / [`Purpose::Unblock`], only the existing links
+    /// (including requirements on tasks unknown here, so they can be removed).
     pub fn new(repo: &Repo, current_tab: Option<TabId>, purpose: Purpose, query: &str) -> anyhow::Result<Self> {
+        let short = |id: TaskId| {
+            let t = repo.task(id).map(|t| t.title).unwrap_or_default();
+            let mut s: String = t.chars().take(30).collect();
+            if t.chars().count() > 30 {
+                s.push('…');
+            }
+            s
+        };
+        let (title, links): (String, Option<Vec<cpasfait_core::DepInfo>>) = match purpose {
+            Purpose::Go => (" find task ".into(), None),
+            Purpose::Require(id) => (format!(" “{}” requires… ", short(id)), None),
+            Purpose::Block(id) => (format!(" “{}” blocks… ", short(id)), None),
+            Purpose::Unrequire(id) => (
+                format!(" “{}” no longer requires… ", short(id)),
+                Some(repo.dependencies(id)?.requires),
+            ),
+            Purpose::Unblock(id) => (
+                format!(" “{}” no longer blocks… ", short(id)),
+                Some(repo.dependencies(id)?.blocks),
+            ),
+        };
+        let this = match purpose {
+            Purpose::Go => None,
+            Purpose::Require(id) | Purpose::Block(id) | Purpose::Unrequire(id) | Purpose::Unblock(id) => Some(id),
+        };
         let mut tabs = repo.tabs()?;
         tabs.sort_by_key(|t| Some(t.id) != current_tab);
-        if purpose != Purpose::Go {
-            tabs.retain(|t| Some(t.id) == current_tab);
-        }
         let mut candidates = vec![];
-        let mut title = " find task ".to_owned();
         for tab in tabs {
             let tree = repo.tree(tab.id)?;
-            let name = |id| {
-                let t: &str = tree.get(id).map(|t| t.title.as_str()).unwrap_or("?");
-                let mut s: String = t.chars().take(30).collect();
-                if t.chars().count() > 30 {
-                    s.push('…');
-                }
-                s
-            };
-            let keep: Option<Vec<TaskId>> = match purpose {
-                Purpose::Go => None,
-                Purpose::Require(id) => {
-                    title = format!(" “{}” requires… ", name(id));
-                    Some(tree.iter().map(|t| t.id).filter(|&t| t != id).collect())
-                }
-                Purpose::Block(id) => {
-                    title = format!(" “{}” blocks… ", name(id));
-                    Some(tree.iter().map(|t| t.id).filter(|&t| t != id).collect())
-                }
-                Purpose::Unrequire(id) => {
-                    title = format!(" “{}” no longer requires… ", name(id));
-                    Some(tree.blockers(id))
-                }
-                Purpose::Unblock(id) => {
-                    title = format!(" “{}” no longer blocks… ", name(id));
-                    Some(tree.blocking(id))
-                }
-            };
             for t in tree.iter() {
-                if keep.as_ref().is_some_and(|k| !k.contains(&t.id)) {
+                if Some(t.id) == this || links.as_ref().is_some_and(|l| !l.iter().any(|d| d.task == t.id)) {
                     continue;
                 }
                 let mut path = tree.path(t.id);
@@ -107,6 +109,24 @@ impl Search {
                     done: t.is_done(),
                 });
             }
+        }
+        // Links to tasks that are not visible here (other tab not shared with
+        // this device, not synced yet, deleted): still removable.
+        for d in links.iter().flatten() {
+            if candidates.iter().any(|c| c.id == d.task) {
+                continue;
+            }
+            candidates.push(Candidate {
+                id: d.task,
+                tab: d.tab.unwrap_or_else(|| current_tab.unwrap_or_default()),
+                tab_name: d.tab_name.clone().unwrap_or_else(|| "unknown tab".into()),
+                title: d
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| format!("unknown task {}", short_id(d.task))),
+                context: crate::ui::dep_problem(d.state).unwrap_or_default().to_owned(),
+                done: false,
+            });
         }
         let mut s = Self {
             purpose,
