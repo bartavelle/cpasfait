@@ -255,3 +255,63 @@ mod tests {
         }
     }
 }
+
+/// A tab setting this client understands.
+#[derive(Clone, Copy, Debug)]
+pub struct SettingInfo {
+    pub name: &'static str,
+    pub help: &'static str,
+}
+
+/// The settings [`TabSettings`] knows, in display order.
+pub const TAB_SETTINGS: &[SettingInfo] = &[SettingInfo {
+    name: "default_priority",
+    help: "priority of new tasks",
+}];
+
+/// Per-tab settings, shared with the tab's members (`tab.setting:<name>` ops).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct TabSettings {
+    /// Priority given to tasks created in this tab.
+    pub default_priority: i64,
+}
+
+impl TabSettings {
+    /// Take a stored value into account (unknown names and malformed values
+    /// are ignored: they may come from a newer client).
+    pub(crate) fn apply(&mut self, name: &str, value: &serde_json::Value) {
+        if name == "default_priority"
+            && let Some(p) = value.as_i64()
+        {
+            self.default_priority = p;
+        }
+    }
+
+    pub fn describe(name: &str) -> crate::Result<&'static SettingInfo> {
+        TAB_SETTINGS.iter().find(|s| s.name == name).ok_or_else(|| {
+            let known: Vec<_> = TAB_SETTINGS.iter().map(|s| s.name).collect();
+            crate::Error::Invalid(format!("unknown setting {name:?} (known: {})", known.join(", ")))
+        })
+    }
+
+    /// The wire value of a setting given as text.
+    pub fn parse(name: &str, text: &str) -> crate::Result<serde_json::Value> {
+        Self::describe(name)?;
+        let text = text.trim();
+        match name {
+            "default_priority" => text
+                .parse::<i64>()
+                .map(serde_json::Value::from)
+                .map_err(|_| crate::Error::Invalid(format!("{name}: expected an integer, got {text:?}"))),
+            _ => unreachable!("described above"),
+        }
+    }
+
+    /// A setting's current value, as text.
+    pub fn get(&self, name: &str) -> Option<String> {
+        match name {
+            "default_priority" => Some(self.default_priority.to_string()),
+            _ => None,
+        }
+    }
+}

@@ -99,6 +99,20 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
                 params![entity, recipient, name],
             )?;
         }
+        TabSetting { name, value } => {
+            ensure_tab()?;
+            if value.is_null() {
+                conn.execute(
+                    "DELETE FROM tab_setting WHERE tab = ?1 AND name = ?2",
+                    params![entity, name],
+                )?;
+            } else {
+                conn.execute(
+                    "INSERT OR REPLACE INTO tab_setting(tab, name, value) VALUES (?1, ?2, ?3)",
+                    params![entity, name, value.to_string()],
+                )?;
+            }
+        }
         TaskTitle(s) => set!(ensure_task, "task", "title", s),
         TaskNotes(s) => set!(ensure_task, "task", "notes", s),
         TaskStatus(s) => set!(ensure_task, "task", "status", s.as_str()),

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -143,6 +143,16 @@ ALTER TABLE tab ADD COLUMN move_by TEXT;
 ALTER TABLE tab ADD COLUMN move_done TEXT;
 ";
 
+/// Tab settings (read model): JSON values, absent = default.
+const SCHEMA_V6: &str = "
+CREATE TABLE tab_setting(
+    tab TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY(tab, name)
+) WITHOUT ROWID;
+";
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -165,6 +175,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 5 {
         tx.execute_batch(SCHEMA_V5)?;
+    }
+    if version < 6 {
+        tx.execute_batch(SCHEMA_V6)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

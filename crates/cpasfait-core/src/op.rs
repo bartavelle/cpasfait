@@ -58,6 +58,13 @@ pub enum Change {
     /// The tab's data was moved to another remote (see [`crate::sync::move_tab`]).
     /// Wire value: `{"id": uuid, "remote": spec, "by": user}`.
     TabMove(crate::model::RemoteMove),
+    /// A tab setting (see [`crate::model::TabSettings`]). Wire value: any
+    /// JSON value, `null` to reset to the default. Settings this client does
+    /// not know are stored and synced all the same.
+    TabSetting {
+        name: String,
+        value: Value,
+    },
 
     TaskTitle(String),
     TaskNotes(String),
@@ -102,12 +109,13 @@ pub enum EntityKind {
 const TAG_PREFIX: &str = "task.tag:";
 const BLOCKED_BY_PREFIX: &str = "task.blocked_by:";
 pub(crate) const MEMBER_PREFIX: &str = "tab.member:";
+const SETTING_PREFIX: &str = "tab.setting:";
 
 impl Change {
     pub fn kind(&self) -> EntityKind {
         use Change::*;
         match self {
-            TabName(_) | TabDeleted(_) | TabMember { .. } | TabMove(_) => EntityKind::Tab,
+            TabName(_) | TabDeleted(_) | TabMember { .. } | TabMove(_) | TabSetting { .. } => EntityKind::Tab,
             TaskTitle(_)
             | TaskNotes(_)
             | TaskStatus(_)
@@ -131,6 +139,7 @@ impl Change {
             TabDeleted(_) => "tab.deleted".into(),
             TabMember { recipient, .. } => format!("{MEMBER_PREFIX}{recipient}"),
             TabMove(_) => "tab.move".into(),
+            TabSetting { name, .. } => format!("{SETTING_PREFIX}{name}"),
             TaskTitle(_) => "task.title".into(),
             TaskNotes(_) => "task.notes".into(),
             TaskStatus(_) => "task.status".into(),
@@ -160,6 +169,7 @@ impl Change {
             TabMember { name: Some(n), .. } => json!(n),
             TabMember { name: None, .. } => json!(false),
             TabMove(m) => json!({"id": m.id.to_string(), "remote": m.remote, "by": m.by}),
+            TabSetting { value, .. } => value.clone(),
             TaskBlockedBy { on: false, .. } => json!(false),
             TaskBlockedBy { tab: None, .. } => json!(true),
             TaskBlockedBy { tab: Some(tab), .. } => json!(tab.0.to_string()),
@@ -204,6 +214,12 @@ impl Change {
                     Value::Bool(false) => None,
                     _ => return None,
                 },
+            });
+        }
+        if let Some(name) = field.strip_prefix(SETTING_PREFIX) {
+            return Some(TabSetting {
+                name: name.to_owned(),
+                value: value.clone(),
             });
         }
         if let Some(task) = field.strip_prefix(BLOCKED_BY_PREFIX) {
@@ -300,6 +316,14 @@ mod tests {
             Change::TabMember {
                 recipient: "ssh-ed25519 AAAA".into(),
                 name: None,
+            },
+            Change::TabSetting {
+                name: "default_priority".into(),
+                value: json!(2),
+            },
+            Change::TabSetting {
+                name: "future".into(),
+                value: Value::Null,
             },
             Change::TaskBlockedBy {
                 task: TaskId::new(),

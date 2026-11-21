@@ -595,3 +595,21 @@ fn moving_a_tab_between_remotes() {
     );
     assert_eq!(titles(&bob), vec!["Paint"]);
 }
+
+#[test]
+fn tab_settings() {
+    let (mut app, _) = app();
+    press(&mut app, ":tabset<enter>");
+    assert_eq!(message(&app), "default_priority=0 (priority of new tasks)");
+    press(&mut app, ":tabset default_priority 3<enter>");
+    assert_eq!(message(&app), "default_priority=3 (priority of new tasks)");
+    press(&mut app, "nnew<enter>");
+    let t = app.selected().unwrap();
+    assert_eq!(app.repo.task(t).unwrap().priority, 3);
+    press(&mut app, ":tabset default_priority=x<enter>");
+    assert!(message(&app).contains("expected an integer"), "{}", message(&app));
+    press(&mut app, ":tabset nope<enter>");
+    assert!(message(&app).contains("unknown setting"), "{}", message(&app));
+    press(&mut app, ":tabunset default_priority<enter>");
+    assert_eq!(message(&app), "default_priority=0 (priority of new tasks)");
+}

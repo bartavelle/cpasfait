@@ -1026,6 +1026,31 @@ impl App {
                     m.name
                 ));
             }
+            "tabset" | "tabunset" => {
+                let tab = self.tab_id()?;
+                let (name, value) = match arg.split_once(['=', ' ']) {
+                    Some((n, v)) => (n.trim(), Some(v.trim())),
+                    None => (arg, None),
+                };
+                if cmd == "tabunset" {
+                    if name.is_empty() || value.is_some() {
+                        bail!("usage: :tabunset NAME");
+                    }
+                    self.repo.set_tab_setting(tab, name, None)?;
+                } else if let Some(v) = value {
+                    self.repo.set_tab_setting(tab, name, Some(v))?;
+                }
+                let settings = self.repo.tab_settings(tab)?;
+                let shown: Vec<String> = cpasfait_core::TAB_SETTINGS
+                    .iter()
+                    .filter(|s| name.is_empty() || s.name == name)
+                    .map(|s| format!("{}={} ({})", s.name, settings.get(s.name).unwrap_or_default(), s.help))
+                    .collect();
+                if shown.is_empty() {
+                    cpasfait_core::TabSettings::describe(name)?;
+                }
+                self.info(shown.join(", "));
+            }
             "tabmembers" => {
                 let tab = self.tab_id()?;
                 let mine = self.identity.as_ref().map(|i| i.recipient().to_owned());

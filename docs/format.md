@@ -40,6 +40,7 @@ are ordered after them.
 | `tab.name` | string | |
 | `tab.deleted` | bool | tombstone |
 | `tab.move` | `{"id": uuid, "remote": spec, "by": name}` | the tab's data was moved to another remote (spec as typed in `:tabremote`) |
+| `tab.setting:<name>` | any \| `null` | a tab setting; `null` resets it to its default. Known: `default_priority` (integer, priority given to new tasks). Unknown settings and malformed values are kept and synced but ignored |
 | `tab.member:<public key>` | string \| `false` | a member of a shared tab and their display name; `false` once removed. The key is an age X25519 recipient (`age1…`) or an SSH public key without comment (`ssh-ed25519 AAAA…`) |
 | `task.title` | string | |
 | `task.notes` | string | free text |

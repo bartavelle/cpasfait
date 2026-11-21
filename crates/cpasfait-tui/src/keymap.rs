@@ -149,10 +149,10 @@ Work log      s        start/stop working on the task   S      stop any running 
 View          H        hide/show done tasks             D      toggle detail pane
               T        time spent box: hidden → today → this week → this month
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
-              :prio N   :title TEXT   :worknote TEXT   :user NAME
+              :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q
               :require  :block  :unrequire  :unblock  (pick the other task)
-              :tabnew NAME   :tabrename NAME   :tabclose!   :sync
-              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild   :q
+              :tabnew NAME  :tabrename NAME  :tabclose!  :tabset [NAME [VALUE]]
+              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild
               REMOTE = a directory, gdrive:FOLDER-ID, or rsync:[user@]host:path
 Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME
               :tabmembers   (remote data is encrypted to the members' age/SSH keys)

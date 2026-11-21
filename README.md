@@ -30,12 +30,13 @@ Press `?` in the TUI for all keys. The essentials:
 
 - `j`/`k` move, `h`/`l` fold or unfold, `n`/`a` add a task / a subtask, `i` edit, `x` done, `dd` delete
 - Tasks are sorted by score (see below) among their siblings, done ones last: `+`/`-` and `:due` move them
-- `>>`/`<<` indent or outdent, `J`/`K` reorder, `+`/`-` priority
+- `>>`/`<<` indent or outdent, `+`/`-` priority
 - `s` start or stop working on the task; `S` stops whatever is running
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
 - `T` shows time spent per task in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
+- `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (default 0)
 - `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task
 
 ### Sharing a tab

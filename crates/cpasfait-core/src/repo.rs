@@ -4,7 +4,9 @@ use crate::apply::{apply_op, apply_to_model};
 use crate::error::{Error, Result};
 use crate::hlc::{ClockState, Hlc};
 use crate::ids::{DeviceId, SessionId, TabId, TaskId};
-use crate::model::{DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, Task};
+use crate::model::{
+    DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, TabSettings, Task,
+};
 use crate::op::{Change, Entity, Op, Status};
 use crate::position::key_between;
 use crate::schema;
@@ -346,6 +348,44 @@ impl Repo {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The tab's settings (defaults for those never set or unreadable).
+    pub fn tab_settings(&self, tab: TabId) -> Result<TabSettings> {
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT name, value FROM tab_setting WHERE tab = ?1")?;
+        let rows = st.query_map(params![tab.to_string()], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut settings = TabSettings::default();
+        for row in rows {
+            let (name, value) = row?;
+            if let Ok(v) = serde_json::from_str(&value) {
+                settings.apply(&name, &v);
+            }
+        }
+        Ok(settings)
+    }
+
+    /// Set a tab setting from its text form (see [`TabSettings::parse`]), or
+    /// reset it to its default (`None`).
+    pub fn set_tab_setting(&mut self, tab: TabId, name: &str, value: Option<&str>) -> Result<()> {
+        let value = match value {
+            Some(v) => TabSettings::parse(name, v)?,
+            None => {
+                TabSettings::describe(name)?;
+                serde_json::Value::Null
+            }
+        };
+        self.edit1(
+            tab,
+            tab,
+            Change::TabSetting {
+                name: name.to_owned(),
+                value,
+            },
+        )
+    }
+
     /// Add (`Some(name)`) or remove (`None`) a member of a shared tab. Keys are
     /// distributed, and rotated after a removal, by the next sync.
     pub fn set_member(&mut self, tab: TabId, recipient: &str, name: Option<&str>) -> Result<()> {
@@ -579,6 +619,10 @@ impl Repo {
         ];
         if parent.is_some() {
             edits.push((tab, id.0, Change::TaskParent(parent)));
+        }
+        let priority = self.tab_settings(tab)?.default_priority;
+        if priority != 0 {
+            edits.push((tab, id.0, Change::TaskPriority(priority)));
         }
         self.commit(edits)?;
         Ok(id)
@@ -1167,7 +1211,7 @@ impl Repo {
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(
             "DELETE FROM field_hlc; DELETE FROM task; DELETE FROM task_tag; DELETE FROM task_dep; DELETE FROM session;
-             DELETE FROM tab_member;
+             DELETE FROM tab_member; DELETE FROM tab_setting;
              UPDATE tab SET name = '', deleted = 0, move_id = NULL, move_remote = NULL, move_by = NULL;",
         )?;
         for op in &ops {
@@ -1192,6 +1236,7 @@ impl Repo {
             ("SELECT task, tag FROM task_tag ORDER BY task, tag", 2),
             ("SELECT task, blocker FROM task_dep ORDER BY task, blocker", 2),
             ("SELECT tab, recipient, name FROM tab_member ORDER BY tab, recipient", 3),
+            ("SELECT tab, name, value FROM tab_setting ORDER BY tab, name", 3),
             (
                 "SELECT id, tab, task, device, user, start, end, note, deleted FROM session ORDER BY id",
                 9,

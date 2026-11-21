@@ -232,7 +232,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
     };
     {
         let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; PRAGMA user_version = 1;")
+        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; PRAGMA user_version = 1;")
             .unwrap();
     }
     // The read-only open used by the companion tools migrates too.
@@ -297,4 +297,36 @@ fn dependencies_across_tabs() {
     r1.delete_task(car).unwrap();
     assert_eq!(r1.dependencies(report).unwrap().requires[0].state, DepState::Deleted);
     assert!(!r1.tree(work).unwrap().is_blocked(report));
+}
+
+#[test]
+fn tab_settings() {
+    let mut r = Repo::open_in_memory().unwrap();
+    let tab = r.create_tab("work").unwrap();
+    let other = r.create_tab("home").unwrap();
+    assert_eq!(r.tab_settings(tab).unwrap().default_priority, 0);
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+
+    r.set_tab_setting(tab, "default_priority", Some(" 2 ")).unwrap();
+    assert_eq!(r.tab_settings(tab).unwrap().default_priority, 2);
+    assert_eq!(r.tab_settings(other).unwrap().default_priority, 0);
+    let b = r.add_task(tab, Place::LastChildOf(Some(a)), "b").unwrap();
+    let c = r.add_task(other, Place::LastChildOf(None), "c").unwrap();
+    assert_eq!(r.task(b).unwrap().priority, 2);
+    assert_eq!(r.task(c).unwrap().priority, 0);
+    // existing tasks are not changed
+    assert_eq!(r.task(a).unwrap().priority, 0);
+
+    assert!(r.set_tab_setting(tab, "default_priority", Some("high")).is_err());
+    assert!(r.set_tab_setting(tab, "colour", Some("1")).is_err());
+    assert!(r.set_tab_setting(tab, "colour", None).is_err());
+
+    // reset; the read model survives a rebuild
+    r.set_tab_setting(other, "default_priority", Some("-1")).unwrap();
+    r.set_tab_setting(tab, "default_priority", None).unwrap();
+    let before = r.dump_model().unwrap();
+    r.rebuild().unwrap();
+    assert_eq!(r.dump_model().unwrap(), before);
+    assert_eq!(r.tab_settings(tab).unwrap().default_priority, 0);
+    assert_eq!(r.tab_settings(other).unwrap().default_priority, -1);
 }

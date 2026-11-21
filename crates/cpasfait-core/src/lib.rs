@@ -23,7 +23,10 @@ pub mod tree;
 
 pub use error::{Error, Result};
 pub use ids::{DeviceId, SessionId, TabId, TaskId};
-pub use model::{DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, Task};
+pub use model::{
+    DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, SettingInfo, TAB_SETTINGS,
+    TabInfo, TabSettings, Task,
+};
 pub use op::{Change, Op, Status};
 pub use repo::{Place, Repo};
 pub use tree::{Row, Tree};
