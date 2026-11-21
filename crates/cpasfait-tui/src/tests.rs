@@ -199,7 +199,7 @@ fn render_snapshot() {
     app.detail_sessions.clear();
     insta::assert_snapshot!(screen(&mut app, 90, 12));
     press(&mut app, "?");
-    insta::assert_snapshot!("help", screen(&mut app, 100, 30));
+    insta::assert_snapshot!("help", screen(&mut app, 100, 32));
 }
 
 #[test]
@@ -612,4 +612,28 @@ fn tab_settings() {
     assert!(message(&app).contains("unknown setting"), "{}", message(&app));
     press(&mut app, ":tabunset default_priority<enter>");
     assert_eq!(message(&app), "default_priority=0 (priority of new tasks)");
+}
+
+#[test]
+fn help_scrolls() {
+    let (mut app, _) = app();
+    press(&mut app, "?");
+    let top = screen(&mut app, 100, 12);
+    assert!(top.contains("Navigation"), "{top}");
+    assert!(top.contains("↓ j/k"), "{top}");
+    press(&mut app, "x"); // other keys do nothing
+    assert!(matches!(app.mode, Mode::Help { .. }));
+    press(&mut app, "G");
+    let bottom = screen(&mut app, 100, 12);
+    assert!(bottom.contains("close this help"), "{bottom}");
+    assert!(!bottom.contains("Navigation"), "{bottom}");
+    assert!(bottom.contains("↑ j/k"), "{bottom}");
+    // clamped: one k is one line up from the end
+    press(&mut app, "k");
+    let up = screen(&mut app, 100, 12);
+    assert!(!up.contains("close this help"), "{up}");
+    press(&mut app, "gj");
+    assert!(!screen(&mut app, 100, 12).contains("Navigation"));
+    press(&mut app, "q");
+    assert!(matches!(app.mode, Mode::Normal));
 }

@@ -30,7 +30,12 @@ pub enum Mode {
         task: TaskId,
         editor: LineEditor,
     },
-    Help,
+    /// The help screen. `scroll`: first line shown; `page`: lines visible
+    /// (both kept in range by the renderer).
+    Help {
+        scroll: u16,
+        page: u16,
+    },
 }
 
 pub struct Message {
@@ -273,8 +278,23 @@ impl App {
 
     fn on_key_inner(&mut self, key: KeyEvent) -> Result<()> {
         match &mut self.mode {
-            Mode::Help => {
-                self.mode = Mode::Normal;
+            Mode::Help { scroll, page } => {
+                let half = (*page / 2).max(1);
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => *scroll = scroll.saturating_add(1),
+                    KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                    KeyCode::Char('d') if ctrl => *scroll = scroll.saturating_add(half),
+                    KeyCode::Char('u') if ctrl => *scroll = scroll.saturating_sub(half),
+                    KeyCode::Char('f') if ctrl => *scroll = scroll.saturating_add(*page),
+                    KeyCode::Char('b') if ctrl => *scroll = scroll.saturating_sub(*page),
+                    KeyCode::PageDown | KeyCode::Char(' ') => *scroll = scroll.saturating_add(*page),
+                    KeyCode::PageUp => *scroll = scroll.saturating_sub(*page),
+                    KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                    KeyCode::Char('G') | KeyCode::End => *scroll = u16::MAX,
+                    KeyCode::Char('q' | '?') | KeyCode::Esc | KeyCode::Enter => self.mode = Mode::Normal,
+                    _ => {}
+                }
                 Ok(())
             }
             Mode::Insert { editor, task, new } => {
@@ -703,7 +723,7 @@ impl App {
                 Some(t) => self.start_tags(t),
                 None => self.info("no task selected"),
             },
-            Help => self.mode = Mode::Help,
+            Help => self.mode = Mode::Help { scroll: 0, page: 0 },
             Quit => self.quit = true,
         }
         Ok(())
@@ -729,7 +749,7 @@ impl App {
             "" => {}
             "q" | "quit" | "q!" | "wq" | "x" => self.quit = true,
             "w" => self.info("changes are saved automatically"),
-            "h" | "help" => self.mode = Mode::Help,
+            "h" | "help" => self.mode = Mode::Help { scroll: 0, page: 0 },
             "due" => {
                 let t = need_task(self)?;
                 let due = match arg {

@@ -1,34 +1,36 @@
 ---
 source: crates/cpasfait-tui/src/tests.rs
-expression: "screen(&mut app, 100, 30)"
+expression: "screen(&mut app, 100, 32)"
 ---
  1:inbox                                                                                      alice
  inbox                                                     │ details
-▶ ▾ [ ┌ help ────────────────────────────────────────────────────────────────────────────────┐
-      │Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page                   │
-      │              h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold            │
-      │              gt/gT    next/prev tab (also Alt-→/Alt-←) 1-9    go to tab              │
-      │              gn       jump to next (most prioritary) task                            │
-      │              gs       jump to the task being worked on                               │
-      │              ^p /     find a task (fuzzy, all tabs): ↑/↓ choose, Enter go            │
-      │Editing       n        new task (beside this one)       a      new subtask            │
-      │              i Enter  edit title    cc  replace title   e      notes in $EDITOR      │
-      │              x Space  toggle done   dd  delete          u      undo delete           │
-      │              >>/<<    indent/outdent       (tasks are sorted by score: + - :due)     │
-      │              +/-      priority up/down                 t      edit tags              │
-      │Work log      s        start/stop working on the task   S      stop any running work  │
-      │View          H        hide/show done tasks             D      toggle detail pane     │
-      │              T        time spent box: hidden → today → this week → this month        │
-      │Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b         │
-      │              :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q        │
-      │              :require  :block  :unrequire  :unblock  (pick the other task)           │
-      │              :tabnew NAME  :tabrename NAME  :tabclose!  :tabset [NAME [VALUE]]       │
-      │              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild            │
-      │              REMOTE = a directory, gdrive:FOLDER-ID, or rsync:[user@]host:path       │
-      │Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME       │
-      │              :tabmembers   (remote data is encrypted to the members' age/SSH keys)   │
-      │              :tabmove REMOTE  move it for everyone   :tabaccept  follow a move (⇅↪)  │
-      │Press any key to close this help.                                                     │
-      └──────────────────────────────────────────────────────────────────────────────────────┘
+▶ ▾ ┌ help ───────────────────────────────────────────────────────────────────────────────────┐
+    │Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page                      │
+    │              h/l ←/→  fold/parent, unfold/child        Tab/za toggle fold               │
+    │              gt/gT    next/prev tab (also Alt-→/Alt-←) 1-9    go to tab                 │
+    │              gn       jump to next (most prioritary) task                               │
+    │              gs       jump to the task being worked on                                  │
+    │              ^p /     find a task (fuzzy, all tabs): ↑/↓ choose, Enter go               │
+    │Editing       n        new task (beside this one)       a      new subtask               │
+    │              i Enter  edit title    cc  replace title   e      notes in $EDITOR         │
+    │              x Space  toggle done   dd  delete          u      undo delete              │
+    │              >>/<<    indent/outdent       (tasks are sorted by score: + - :due)        │
+    │              +/-      priority up/down                 t      edit tags                 │
+    │Work log      s        start/stop working on the task   S      stop any running work     │
+    │View          H        hide/show done tasks             D      toggle detail pane        │
+    │              T        time spent box: hidden → today → this week → this month           │
+    │Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b            │
+    │              :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q           │
+    │              :require  :block  :unrequire  :unblock  (pick the other task)              │
+    │              :tabnew NAME   :tabrename NAME   :tabclose!                                │
+    │              :tabset [NAME [VALUE]]   :tabunset NAME   tab settings (default_priority)  │
+    │              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild               │
+    │              REMOTE = a directory, gdrive:FOLDER-ID, or rsync:[user@]host:path          │
+    │Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME          │
+    │              :tabmembers   (remote data is encrypted to the members' age/SSH keys)      │
+    │              :tabmove REMOTE  move it for everyone   :tabaccept  follow a move (⇅↪)     │
+    │j/k ^d/^u Space scroll, q Esc ? close this help.                                         │
+    └─────────────────────────────────────────────────────────────────────────────────────────┘
+                                                           │
                                                            │
  NORMAL                                                                           ⏱ Project 0:00:00

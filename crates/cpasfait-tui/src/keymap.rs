@@ -151,10 +151,11 @@ View          H        hide/show done tasks             D      toggle detail pan
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q
               :require  :block  :unrequire  :unblock  (pick the other task)
-              :tabnew NAME  :tabrename NAME  :tabclose!  :tabset [NAME [VALUE]]
+              :tabnew NAME   :tabrename NAME   :tabclose!
+              :tabset [NAME [VALUE]]   :tabunset NAME   tab settings (default_priority)
               :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild
               REMOTE = a directory, gdrive:FOLDER-ID, or rsync:[user@]host:path
 Sharing       :mykey  your public key   :tabinvite KEY [NAME]   :tabrevoke NAME
               :tabmembers   (remote data is encrypted to the members' age/SSH keys)
               :tabmove REMOTE  move it for everyone   :tabaccept  follow a move (⇅↪)
-Press any key to close this help.";
+j/k ^d/^u Space scroll, q Esc ? close this help.";

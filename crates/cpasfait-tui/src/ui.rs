@@ -38,8 +38,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Mode::Search(search) = &app.mode {
         render_search(f, search, body);
     }
-    if matches!(app.mode, Mode::Help) {
-        render_help(f);
+    if let Mode::Help { scroll, page } = &mut app.mode {
+        render_help(f, scroll, page);
     }
 }
 
@@ -609,9 +609,10 @@ fn time_row(title: &str, dur: &str, width: usize, style: Style) -> Line<'static>
     ])
 }
 
-fn render_help(f: &mut Frame) {
+fn render_help(f: &mut Frame, scroll: &mut u16, page: &mut u16) {
     let area = f.area();
-    let h = (HELP.lines().count() as u16 + 2).min(area.height);
+    let lines = HELP.lines().count() as u16;
+    let h = (lines + 2).min(area.height);
     let w = (HELP.lines().map(|l| l.width()).max().unwrap_or(0) as u16 + 4).min(area.width);
     let r = Rect {
         x: area.x + (area.width - w) / 2,
@@ -619,13 +620,19 @@ fn render_help(f: &mut Frame) {
         width: w,
         height: h,
     };
+    *page = h.saturating_sub(2);
+    *scroll = (*scroll).min(lines.saturating_sub(*page));
+    let mut block = Block::bordered()
+        .title(" help ".bold())
+        .style(Style::new().add_modifier(Modifier::empty()));
+    if lines > *page {
+        let more = match (*scroll > 0, *scroll + *page < lines) {
+            (true, true) => "↑↓",
+            (false, _) => "↓",
+            (true, false) => "↑",
+        };
+        block = block.title_bottom(Line::from(format!(" {more} j/k ^d/^u scroll · q close ")).right_aligned());
+    }
     f.render_widget(Clear, r);
-    f.render_widget(
-        Paragraph::new(HELP).block(
-            Block::bordered()
-                .title(" help ".bold())
-                .style(Style::new().add_modifier(Modifier::empty())),
-        ),
-        r,
-    );
+    f.render_widget(Paragraph::new(HELP).scroll((*scroll, 0)).block(block), r);
 }
