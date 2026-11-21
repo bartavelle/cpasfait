@@ -1,62 +1,17 @@
-//! The configuration file (location: [`cpasfait_core::paths::config_path`]).
+//! First run: create the configuration file (see [`cpasfait_core::config`]).
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+pub use cpasfait_core::config::Config;
+use cpasfait_core::config::check_email;
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::Path;
-
-#[derive(Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
-    /// Recorded as the author of the tasks this user creates.
-    pub email: Option<String>,
-    /// Display name (else the one stored in the database, see `:user`).
-    pub name: Option<String>,
-}
-
-impl Config {
-    pub fn parse(text: &str) -> Result<Config> {
-        let c: Config = toml::from_str(text)?;
-        if let Some(e) = &c.email {
-            check_email(e)?;
-        }
-        Ok(c)
-    }
-
-    pub fn load(path: &Path) -> Result<Config> {
-        let text = std::fs::read_to_string(path)?;
-        Self::parse(&text).with_context(|| format!("in {}", path.display()))
-    }
-
-    /// The file written on first run.
-    pub fn template(email: &str) -> String {
-        format!(
-            "# cpasfait configuration\n\
-             \n\
-             # Recorded as the author of the tasks you create.\n\
-             email = {}\n\
-             \n\
-             # Display name, shown to the people you share tabs with\n\
-             # (default: your login name; :user NAME in the app changes it when this is unset).\n\
-             # name = \"Your Name\"\n",
-            toml::Value::String(email.to_owned())
-        )
-    }
-}
-
-fn check_email(e: &str) -> Result<()> {
-    match e.split_once('@') {
-        Some((user, host)) if !user.is_empty() && !host.is_empty() && !e.contains(char::is_whitespace) => Ok(()),
-        _ => bail!("{e:?} is not an email address"),
-    }
-}
 
 /// Load the configuration; when there is no file and we are in a terminal,
 /// ask for the email and create it. Without a terminal, run unconfigured.
 pub fn load_or_create() -> Result<Config> {
     let path = cpasfait_core::paths::config_path();
     if path.exists() {
-        return Config::load(&path);
+        return Ok(Config::load(&path)?);
     }
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
         eprintln!(
@@ -69,7 +24,7 @@ pub fn load_or_create() -> Result<Config> {
     let email = ask_email(&mut stdin, &mut std::io::stdout())?;
     write_new(&path, &Config::template(&email))?;
     println!("Wrote {}", path.display());
-    Config::load(&path)
+    Ok(Config::load(&path)?)
 }
 
 /// Ask until a valid email is typed. End of input aborts.
@@ -89,7 +44,8 @@ fn ask_email(input: &mut impl BufRead, out: &mut impl Write) -> Result<String> {
         let email = line.trim();
         match check_email(email) {
             Ok(()) => return Ok(email.to_owned()),
-            Err(e) => writeln!(out, "{e}, try again (Ctrl-D to quit)")?,
+            Err(cpasfait_core::Error::Invalid(e)) => writeln!(out, "{e}, try again (Ctrl-D to quit)")?,
+            Err(e) => return Err(e.into()),
         }
     }
 }
@@ -110,18 +66,6 @@ fn write_new(path: &Path, text: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn template_parses() {
-        let c = Config::parse(&Config::template("a\"b@example.org")).unwrap();
-        assert_eq!(c.email.as_deref(), Some("a\"b@example.org"));
-        assert_eq!(c.name, None);
-        assert_eq!(Config::parse("").unwrap(), Config::default());
-        assert!(Config::parse("emial = \"x@y\"").is_err());
-        assert!(Config::parse("email = \"nope\"").is_err());
-        let c = Config::parse("name = \"Alice\"\nemail = \"a@b.c\"").unwrap();
-        assert_eq!(c.name.as_deref(), Some("Alice"));
-    }
 
     #[test]
     fn asks_until_valid() {

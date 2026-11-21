@@ -30,23 +30,30 @@ pub fn own_identity_path() -> PathBuf {
 
 /// The identity (secret key) used to read shared tabs, first found of:
 /// `$CPASFAIT_IDENTITY` (an age identity file or an unencrypted SSH private
-/// key), `<data dir>/identity.txt`, and, unless `$CPASFAIT_DATA_DIR` is set,
-/// age's usual `~/.config/age/keys.txt`.
-pub fn identity_path() -> Option<PathBuf> {
+/// key), `identity` in the configuration file, `<data dir>/identity.txt`,
+/// and, unless `$CPASFAIT_DATA_DIR` is set, age's usual
+/// `~/.config/age/keys.txt`. The first two are used even if the file is
+/// missing (loading it then fails rather than using another key).
+pub fn identity_path() -> crate::Result<Option<PathBuf>> {
     if let Some(p) = std::env::var_os("CPASFAIT_IDENTITY") {
-        return Some(PathBuf::from(p));
+        return Ok(Some(PathBuf::from(p)));
+    }
+    if let Some(p) = crate::config::Config::load_default()?.and_then(|c| c.identity_path()) {
+        return Ok(Some(p));
     }
     let own = own_identity_path();
     if own.exists() {
-        return Some(own);
+        return Ok(Some(own));
     }
-    if std::env::var_os("CPASFAIT_DATA_DIR").is_none() {
-        let age = directories::BaseDirs::new()?.config_dir().join("age").join("keys.txt");
+    if std::env::var_os("CPASFAIT_DATA_DIR").is_none()
+        && let Some(base) = directories::BaseDirs::new()
+    {
+        let age = base.config_dir().join("age").join("keys.txt");
         if age.exists() {
-            return Some(age);
+            return Ok(Some(age));
         }
     }
-    None
+    Ok(None)
 }
 
 /// The configuration file: `$CPASFAIT_CONFIG`, else `config.toml` in

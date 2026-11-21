@@ -256,7 +256,7 @@ impl Identity {
 
     /// The identity at [`crate::paths::identity_path`], if there is one.
     pub fn load_default() -> Result<Option<Identity>> {
-        crate::paths::identity_path().map(|p| Self::load(&p)).transpose()
+        crate::paths::identity_path()?.map(|p| Self::load(&p)).transpose()
     }
 
     /// The default identity, created in the data directory if there is none.

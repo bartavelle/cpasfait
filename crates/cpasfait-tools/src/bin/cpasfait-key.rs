@@ -9,8 +9,9 @@ use cpasfait_core::crypto::Identity;
 ///
 /// Shared tabs are encrypted to their members' keys. The secret key is the
 /// first found of: $CPASFAIT_IDENTITY (an age identity file, or an
-/// unencrypted SSH private key), <data dir>/identity.txt, and
-/// ~/.config/age/keys.txt. If none exists, one is created in the data dir.
+/// unencrypted SSH private key), `identity` in the configuration file,
+/// <data dir>/identity.txt, and ~/.config/age/keys.txt. If none exists, one
+/// is created in the data dir.
 #[derive(Parser)]
 #[command(version)]
 struct Args {

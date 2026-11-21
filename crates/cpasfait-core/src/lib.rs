@@ -5,6 +5,7 @@
 
 mod apply;
 pub mod backend;
+pub mod config;
 pub mod crypto;
 pub mod dates;
 pub mod error;

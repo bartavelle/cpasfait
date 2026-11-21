@@ -34,6 +34,7 @@ email before starting and creates it:
 ```toml
 email = "you@example.org"   # recorded as the author of the tasks you create
 # name = "Your Name"        # display name; overrides the one set with :user
+# identity = "~/.ssh/id_ed25519"   # secret key for shared tabs (see below)
 ```
 
 Each task records its author (name and email, shown in the details pane).
@@ -77,8 +78,12 @@ and on exit.
 Keys:
 
 - Your secret key is the first found of `$CPASFAIT_IDENTITY` (an age identity
-  file, or an unencrypted SSH private key), `<data dir>/identity.txt`, and
-  age's `~/.config/age/keys.txt`. If there is none, cpasfait creates
+  file, or an unencrypted SSH private key), `identity` in the configuration
+  file (`~/` is your home, a relative path is relative to the configuration
+  file), `<data dir>/identity.txt`, and age's `~/.config/age/keys.txt` (only
+  when `CPASFAIT_DATA_DIR` is unset). The first two are used even if the file
+  is missing: that is an error, not a reason to use another key. If none is
+  set or found, cpasfait creates
   `<data dir>/identity.txt` (also `cpasfait-key`, which prints your public key).
   **Back it up**: without it, a new device cannot read your shared tabs (the
   data on your existing devices is not affected; another member can also
