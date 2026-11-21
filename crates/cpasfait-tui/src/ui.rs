@@ -182,7 +182,7 @@ fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> u
         .collect();
     if items.is_empty() {
         f.render_widget(block, area);
-        f.render_widget(Paragraph::new("No tasks. Press o to add one, ? for help.").dim(), inner);
+        f.render_widget(Paragraph::new("No tasks. Press n to add one, ? for help.").dim(), inner);
         return inner.height as usize;
     }
     let list = List::new(items)
@@ -257,6 +257,10 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
                 },
                 Style::new().fg(Color::Cyan),
             ),
+        ]),
+        Line::from(vec![
+            label("author"),
+            Span::raw(t.author.as_ref().map_or_else(|| "-".to_owned(), |a| a.to_string())),
         ]),
     ];
     let current_tab = app.tab().map(|t| t.id);

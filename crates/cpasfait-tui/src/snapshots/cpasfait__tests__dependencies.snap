@@ -12,7 +12,7 @@ expression: "screen(&mut app, 100, 14)"
                                                            │score    0
                                                            │due      -
                                                            │tags     -
+                                                           │author   alice
                                                            │requires ○ Buy paint   ⊘ 1 to do first
                                                            │blocks   ○ Invite friends
-                                                           │
  NORMAL  “Invite friends” now requires “Paint fence”

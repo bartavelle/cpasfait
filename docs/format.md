@@ -52,6 +52,7 @@ are ordered after them.
 | `task.tag:<name>` | bool | tag present or not; one register per tag |
 | `task.blocked_by:<task id>` | tab id \| `true` \| `false` | this task requires that one; the value is the required task's tab (it may be in another tab, `true` = tab unknown), `false` removes the link; one register per pair |
 | `task.deleted` | bool | tombstone; hides the subtree |
+| `task.author` | `{"name": string, "email"?: string}` | who created the task, set once at creation |
 | `session.task` | task id | work session → task |
 | `session.device` | device id | the device that runs the timer |
 | `session.user` | string | display name |

@@ -179,6 +179,26 @@ pub struct Task {
     /// Tasks that must be done before this one (may reference deleted or
     /// unknown tasks: those are ignored).
     pub blocked_by: Vec<TaskId>,
+    /// Who created the task (unknown for tasks made before authors were recorded).
+    pub author: Option<Author>,
+}
+
+/// A person, as recorded on the tasks they create.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Author {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl std::fmt::Display for Author {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.email {
+            Some(e) if self.name.is_empty() => write!(f, "<{e}>"),
+            Some(e) => write!(f, "{} <{e}>", self.name),
+            None => f.write_str(&self.name),
+        }
+    }
 }
 
 impl Task {

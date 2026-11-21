@@ -48,7 +48,7 @@ fn two_devices_converge_over_rsync() {
     r1.share_tab(tab, k1.recipient()).unwrap();
     r1.set_member(tab, k2.recipient(), Some("bob")).unwrap();
     let s = sync_tab(&mut r1, tab, &b1, &k1).unwrap();
-    assert_eq!((s.pushed, s.keys_sent), (5, 1));
+    assert_eq!((s.pushed, s.keys_sent), (6, 1));
     // on the "server"
     assert!(
         tmp.path()
@@ -60,7 +60,7 @@ fn two_devices_converge_over_rsync() {
 
     assert_eq!(remote_tabs(&b2).unwrap(), vec![tab]);
     r2.add_known_tab(tab).unwrap();
-    assert_eq!(sync_tab(&mut r2, tab, &b2, &k2).unwrap().pulled, 5);
+    assert_eq!(sync_tab(&mut r2, tab, &b2, &k2).unwrap().pulled, 6);
 
     r1.set_title(a, "one").unwrap();
     r2.add_task(tab, Place::LastChildOf(Some(a)), "child").unwrap();

@@ -79,6 +79,8 @@ pub enum Change {
         on: bool,
     },
     TaskDeleted(bool),
+    /// Who created the task. Wire value: `{"name": ..., "email": ...}` (email optional).
+    TaskAuthor(crate::model::Author),
     /// `task` must be done before this one ("blocked by" / "requires").
     /// `tab` is the blocker's tab (it may be one this device does not have).
     /// Wire value: the tab id when on (`true` if unknown), `false` when off.
@@ -125,6 +127,7 @@ impl Change {
             | TaskPosition(_)
             | TaskTag { .. }
             | TaskBlockedBy { .. }
+            | TaskAuthor(_)
             | TaskDeleted(_) => EntityKind::Task,
             SessionTask(_) | SessionDevice(_) | SessionUser(_) | SessionStart(_) | SessionEnd(_) | SessionNote(_)
             | SessionDeleted(_) => EntityKind::Session,
@@ -150,6 +153,7 @@ impl Change {
             TaskTag { tag, .. } => format!("{TAG_PREFIX}{tag}"),
             TaskBlockedBy { task, .. } => format!("{BLOCKED_BY_PREFIX}{task}"),
             TaskDeleted(_) => "task.deleted".into(),
+            TaskAuthor(_) => "task.author".into(),
             SessionTask(_) => "session.task".into(),
             SessionDevice(_) => "session.device".into(),
             SessionUser(_) => "session.user".into(),
@@ -173,6 +177,7 @@ impl Change {
             TaskBlockedBy { on: false, .. } => json!(false),
             TaskBlockedBy { tab: None, .. } => json!(true),
             TaskBlockedBy { tab: Some(tab), .. } => json!(tab.0.to_string()),
+            TaskAuthor(a) => serde_json::to_value(a).unwrap_or(Value::Null),
             TaskStatus(s) => json!(s.as_str()),
             TaskPriority(p) => json!(p),
             TaskDue(d) => match d {
@@ -258,6 +263,7 @@ impl Change {
             "task.parent" => TaskParent(if value.is_null() { None } else { Some(TaskId(uuid()?)) }),
             "task.position" => TaskPosition(s()?),
             "task.deleted" => TaskDeleted(b()?),
+            "task.author" => TaskAuthor(serde_json::from_value(value.clone()).ok()?),
             "session.task" => SessionTask(TaskId(uuid()?)),
             "session.device" => SessionDevice(crate::ids::DeviceId(uuid()?)),
             "session.user" => SessionUser(s()?),
@@ -340,6 +346,14 @@ mod tests {
                 tab: None,
                 on: true,
             },
+            Change::TaskAuthor(crate::model::Author {
+                name: "alice".into(),
+                email: Some("alice@example.org".into()),
+            }),
+            Change::TaskAuthor(crate::model::Author {
+                name: "bob".into(),
+                email: None,
+            }),
             Change::TaskParent(Some(TaskId::new())),
             Change::TaskParent(None),
             Change::TaskStatus(Status::Done),

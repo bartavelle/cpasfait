@@ -1,4 +1,5 @@
 mod app;
+mod config;
 mod editor;
 mod fuzzy;
 mod keymap;
@@ -18,8 +19,12 @@ use sync_worker::SyncWorker;
 
 const USAGE: &str = "usage: cpasfait [--db PATH] [--no-sync]
 
-Environment: CPASFAIT_DATA_DIR (database directory), CPASFAIT_USER (display name
-for new databases), EDITOR (notes editor).";
+Configuration: ~/.config/cpasfait/config.toml (created on first run: asks for
+your email, recorded as the author of your tasks).
+
+Environment: CPASFAIT_CONFIG (configuration file), CPASFAIT_DATA_DIR (database
+directory; its config.toml is used instead of the default one), CPASFAIT_USER
+(display name for new databases), EDITOR (notes editor).";
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -38,7 +43,16 @@ fn main() -> Result<()> {
             other => bail!("unknown argument {other:?}\n{USAGE}"),
         }
     }
-    let repo = Repo::open(&db).with_context(|| format!("opening {}", db.display()))?;
+    let config = config::load_or_create()?;
+    let mut repo = Repo::open(&db).with_context(|| format!("opening {}", db.display()))?;
+    if let Some(name) = config.name.as_deref().map(str::trim).filter(|n| !n.is_empty())
+        && name != repo.user()
+    {
+        repo.set_user(name)?;
+    }
+    if config.email.is_some() && config.email.as_deref() != repo.email() {
+        repo.set_email(config.email.as_deref())?;
+    }
     let mut app = App::new(repo)?;
     let worker = sync.then(|| SyncWorker::spawn(db.clone(), SYNC_INTERVAL));
 

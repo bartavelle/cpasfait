@@ -121,6 +121,13 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
         TaskParent(p) => set!(ensure_task, "task", "parent", p.map(|p| p.to_string())),
         TaskPosition(s) => set!(ensure_task, "task", "position", s),
         TaskDeleted(b) => set!(ensure_task, "task", "deleted", b),
+        TaskAuthor(a) => {
+            ensure_task()?;
+            conn.execute(
+                "UPDATE task SET author_name = ?2, author_email = ?3 WHERE id = ?1",
+                params![entity, a.name, a.email],
+            )?;
+        }
         TaskTag { tag, on } => {
             ensure_task()?;
             if on {

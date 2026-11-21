@@ -12,9 +12,9 @@ expression: "screen(&mut app, 90, 16)"
      │  Prepare taxes  [inbox]                                                      │
      └────────────────────────────────────────── ↑/↓ select · Enter go · Esc cancel ┘
                                                      │tags     -
+                                                     │author   alice
                                                      │★ next task in this tab
                                                      │
                                                      │work log  total 0m
-                                                     │
                                                      │
  FIND

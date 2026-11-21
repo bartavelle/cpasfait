@@ -412,7 +412,7 @@ fn dependencies_across_tabs_in_tui() {
     press(&mut app, "gT");
     assert!(app.tree.is_blocked(report));
     app.detail_sessions.clear();
-    let s = screen(&mut app, 130, 12);
+    let s = screen(&mut app, 130, 13);
     assert!(s.contains("requires ○ Fix car [Home]   ⊘ 1 to do first"), "{s}");
     assert!(s.contains("⊘blocked"), "{s}");
 

@@ -12,5 +12,5 @@ expression: "screen(&mut app, 90, 12)"
                                                      │score    0
                                                      │due      -
                                                      │tags     -
-                                                     │
+                                                     │author   alice
  NORMAL  working on "Project"                                           ⏱ Project 0:00:00

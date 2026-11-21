@@ -502,6 +502,7 @@ mod tests {
             deleted: false,
             tags: vec![],
             blocked_by: vec![],
+            author: None,
         }
     }
 

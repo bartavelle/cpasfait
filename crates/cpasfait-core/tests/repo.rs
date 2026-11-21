@@ -232,7 +232,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
     };
     {
         let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; PRAGMA user_version = 1;")
+        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; ALTER TABLE task DROP COLUMN author_name; ALTER TABLE task DROP COLUMN author_email; ALTER TABLE device DROP COLUMN email; PRAGMA user_version = 1;")
             .unwrap();
     }
     // The read-only open used by the companion tools migrates too.
@@ -329,4 +329,24 @@ fn tab_settings() {
     assert_eq!(r.dump_model().unwrap(), before);
     assert_eq!(r.tab_settings(tab).unwrap().default_priority, 0);
     assert_eq!(r.tab_settings(other).unwrap().default_priority, -1);
+}
+
+#[test]
+fn tasks_record_their_author() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let (a, b) = {
+        let mut r = Repo::open(&path).unwrap();
+        r.set_user("alice").unwrap();
+        let tab = r.create_tab("t").unwrap();
+        let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+        r.set_email(Some(" alice@example.org ")).unwrap();
+        let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
+        (a, b)
+    };
+    let r = Repo::open_readonly(&path).unwrap();
+    assert_eq!(r.email(), Some("alice@example.org"));
+    let author = |t| r.task(t).unwrap().author.unwrap().to_string();
+    assert_eq!(author(a), "alice");
+    assert_eq!(author(b), "alice <alice@example.org>");
 }

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -153,6 +153,13 @@ CREATE TABLE tab_setting(
 ) WITHOUT ROWID;
 ";
 
+/// Task authors (read model), and this device's email (local).
+const SCHEMA_V7: &str = "
+ALTER TABLE task ADD COLUMN author_name TEXT;
+ALTER TABLE task ADD COLUMN author_email TEXT;
+ALTER TABLE device ADD COLUMN email TEXT;
+";
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -178,6 +185,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 6 {
         tx.execute_batch(SCHEMA_V6)?;
+    }
+    if version < 7 {
+        tx.execute_batch(SCHEMA_V7)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

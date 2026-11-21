@@ -26,6 +26,19 @@ The database is `$CPASFAIT_DATA_DIR/cpasfait.db`, or by default
 `~/.local/share/cpasfait/cpasfait.db`. Every change is saved immediately.
 `CPASFAIT_USER` sets the display name on first run; `:user NAME` changes it later.
 
+The configuration file is `~/.config/cpasfait/config.toml` (or `$CPASFAIT_CONFIG`;
+when `CPASFAIT_DATA_DIR` is set, `config.toml` in that directory, so that each
+data dir is a separate profile). When it is missing, `cpasfait` asks for your
+email before starting and creates it:
+
+```toml
+email = "you@example.org"   # recorded as the author of the tasks you create
+# name = "Your Name"        # display name; overrides the one set with :user
+```
+
+Each task records its author (name and email, shown in the details pane).
+In shared tabs the other members see it.
+
 Press `?` in the TUI for all keys. The essentials:
 
 - `j`/`k` move, `h`/`l` fold or unfold, `n`/`a` add a task / a subtask, `i` edit, `x` done, `dd` delete

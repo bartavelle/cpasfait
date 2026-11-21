@@ -71,7 +71,7 @@ fn two_devices_converge_through_a_directory() {
     d1.repo.share_tab(tab, d1.id.recipient()).unwrap();
     d1.invite(tab, &d2);
     let s = d1.sync(tab, &backend).unwrap();
-    assert_eq!((s.pulled, s.pushed, s.keys_sent), (0, 5, 1));
+    assert_eq!((s.pulled, s.pushed, s.keys_sent), (0, 6, 1));
 
     // d2 joins
     assert_eq!(remote_tabs(&backend).unwrap(), vec![tab]);
@@ -79,7 +79,7 @@ fn two_devices_converge_through_a_directory() {
     assert!(!invited_to(&backend, tab, &Identity::generate()).unwrap());
     d2.repo.add_known_tab(tab).unwrap();
     let s = d2.sync(tab, &backend).unwrap();
-    assert_eq!((s.pulled, s.pushed, s.keys_sent), (5, 0, 0));
+    assert_eq!((s.pulled, s.pushed, s.keys_sent), (6, 0, 0));
     assert_eq!(d2.repo.tabs().unwrap()[0].name, "shared");
     let members = d2.repo.members(tab).unwrap();
     assert_eq!(
@@ -134,7 +134,7 @@ fn uninvited_devices_cannot_read() {
     d1.invite(tab, &d2);
     assert_eq!(d1.sync(tab, &backend).unwrap().keys_sent, 1);
     let s = d2.sync(tab, &backend).unwrap();
-    assert_eq!((s.pushed, d2.title(a).as_deref()), (2, Some("a")));
+    assert_eq!((s.pushed, d2.title(a).as_deref()), (3, Some("a")));
     d1.sync(tab, &backend).unwrap();
     assert_eq!(d1.title(b).as_deref(), Some("b"));
 }
@@ -346,7 +346,7 @@ fn missing_segment_blocks_cursor() {
     d2.repo.add_known_tab(tab).unwrap();
     assert_eq!(d2.sync(tab, &backend).unwrap().pulled, 0);
     std::fs::rename(&hidden, &first).unwrap();
-    assert_eq!(d2.sync(tab, &backend).unwrap().pulled, 5);
+    assert_eq!(d2.sync(tab, &backend).unwrap().pulled, 6);
     assert_eq!(d1.repo.dump_model().unwrap(), d2.repo.dump_model().unwrap());
 }
 
@@ -363,7 +363,7 @@ fn ops_in_other_tabs_do_not_create_gaps() {
     d2.sync(tab, &backend).unwrap();
     d2.repo.add_task(tab, Place::LastChildOf(None), "from d2").unwrap();
     d2.sync(tab, &backend).unwrap();
-    assert_eq!(d1.sync(tab, &backend).unwrap().pulled, 2);
+    assert_eq!(d1.sync(tab, &backend).unwrap().pulled, 3);
     assert_eq!(d1.repo.tree(tab).unwrap().len(), 1);
 }
 
@@ -499,6 +499,6 @@ fn lost_segments_are_uploaded_again() {
     c.sync(tab, &backend).unwrap();
     assert_eq!(c.title(t).as_deref(), Some("x"));
     // overlapping segments are harmless for those who had them
-    assert_eq!(b.sync(tab, &backend).unwrap().pulled, 3);
+    assert_eq!(b.sync(tab, &backend).unwrap().pulled, 4);
     assert_eq!(b.repo.dump_model().unwrap(), c.repo.dump_model().unwrap());
 }

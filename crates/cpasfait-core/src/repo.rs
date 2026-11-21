@@ -5,7 +5,8 @@ use crate::error::{Error, Result};
 use crate::hlc::{ClockState, Hlc};
 use crate::ids::{DeviceId, SessionId, TabId, TaskId};
 use crate::model::{
-    DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, TabSettings, Task,
+    Author, DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, TabSettings,
+    Task,
 };
 use crate::op::{Change, Entity, Op, Status};
 use crate::position::key_between;
@@ -36,6 +37,7 @@ pub struct Repo {
     conn: Connection,
     device: DeviceId,
     user: String,
+    email: Option<String>,
     now: NowFn,
 }
 
@@ -51,7 +53,7 @@ fn opt_id<T: std::str::FromStr>(s: Option<String>) -> rusqlite::Result<Option<T>
 
 const TASK_COLS: &str = "t.id, t.tab, t.title, t.notes, t.status, t.priority, t.due, t.parent, t.position, t.deleted,
     (SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM task_tag WHERE task = t.id ORDER BY tag)),
-    (SELECT group_concat(blocker, ' ') FROM task_dep WHERE task = t.id)";
+    (SELECT group_concat(blocker, ' ') FROM task_dep WHERE task = t.id), t.author_name, t.author_email";
 
 fn id_list(s: Option<String>) -> rusqlite::Result<Vec<TaskId>> {
     let mut v: Vec<TaskId> = s
@@ -83,6 +85,10 @@ fn task_from_row(r: &Row) -> rusqlite::Result<Task> {
             .map(|t| t.split('\u{1f}').map(str::to_owned).collect())
             .unwrap_or_default(),
         blocked_by: id_list(r.get(11)?)?,
+        author: r.get::<_, Option<String>>(12)?.map(|name| Author {
+            name,
+            email: r.get(13).ok().flatten(),
+        }),
     })
 }
 
@@ -155,15 +161,16 @@ impl Repo {
                 Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
             conn.busy_timeout(Duration::from_secs(5))?;
         }
-        let (device, user) = conn
-            .query_row("SELECT id, user FROM device", [], |r| {
-                Ok((r.get::<_, String>(0)?, r.get(1)?))
+        let (device, user, email) = conn
+            .query_row("SELECT id, user, email FROM device", [], |r| {
+                Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?))
             })
             .optional()?
             .ok_or_else(|| Error::NotFound("device row (empty database?)".into()))?;
         Ok(Repo {
             device: parse_id(&device)?,
             user,
+            email,
             conn,
             now: Box::new(system_now_ms),
         })
@@ -173,11 +180,13 @@ impl Repo {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "foreign_keys", false)?;
         let needs_rebuild = schema::migrate(&mut conn)?;
-        let existing: Option<(String, String)> = conn
-            .query_row("SELECT id, user FROM device", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        let existing: Option<(String, String, Option<String>)> = conn
+            .query_row("SELECT id, user, email FROM device", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .optional()?;
-        let (device, user) = match existing {
-            Some((id, user)) => (parse_id(&id)?, user),
+        let (device, user, email) = match existing {
+            Some((id, user, email)) => (parse_id(&id)?, user, email),
             None => {
                 let id = DeviceId::new();
                 let user = default_user();
@@ -185,13 +194,14 @@ impl Repo {
                     "INSERT INTO device(id, user, hlc_wall, hlc_counter) VALUES (?1, ?2, 0, 0)",
                     params![id.to_string(), user],
                 )?;
-                (id, user)
+                (id, user, None)
             }
         };
         let mut repo = Repo {
             conn,
             device,
             user,
+            email,
             now: Box::new(system_now_ms),
         };
         if needs_rebuild {
@@ -212,6 +222,26 @@ impl Repo {
         self.conn.execute("UPDATE device SET user = ?1", params![user])?;
         self.user = user.to_owned();
         Ok(())
+    }
+
+    /// This user's email, recorded on the tasks they create.
+    pub fn email(&self) -> Option<&str> {
+        self.email.as_deref()
+    }
+
+    pub fn set_email(&mut self, email: Option<&str>) -> Result<()> {
+        let email = email.map(str::trim).filter(|e| !e.is_empty());
+        self.conn.execute("UPDATE device SET email = ?1", params![email])?;
+        self.email = email.map(str::to_owned);
+        Ok(())
+    }
+
+    /// The author recorded on new tasks.
+    pub fn author(&self) -> Author {
+        Author {
+            name: self.user.clone(),
+            email: self.email.clone(),
+        }
     }
 
     /// Replace the time source (tests).
@@ -620,6 +650,7 @@ impl Repo {
         if parent.is_some() {
             edits.push((tab, id.0, Change::TaskParent(parent)));
         }
+        edits.push((tab, id.0, Change::TaskAuthor(self.author())));
         let priority = self.tab_settings(tab)?.default_priority;
         if priority != 0 {
             edits.push((tab, id.0, Change::TaskPriority(priority)));
@@ -1130,6 +1161,7 @@ impl Repo {
                 deleted: r.get(6)?,
                 tags: vec![],
                 blocked_by: id_list(r.get(7)?)?,
+                author: None,
             })
         })?;
         let mut tree = Tree::build(rows.collect::<rusqlite::Result<_>>()?);
@@ -1230,8 +1262,9 @@ impl Repo {
                 6,
             ),
             (
-                "SELECT id, tab, title, notes, status, priority, due, parent, position, deleted FROM task ORDER BY id",
-                10,
+                "SELECT id, tab, title, notes, status, priority, due, parent, position, deleted, author_name, author_email
+                 FROM task ORDER BY id",
+                12,
             ),
             ("SELECT task, tag FROM task_tag ORDER BY task, tag", 2),
             ("SELECT task, blocker FROM task_dep ORDER BY task, blocker", 2),

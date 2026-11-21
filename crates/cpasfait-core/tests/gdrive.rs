@@ -33,7 +33,7 @@ fn converge(b1: &dyn RemoteBackend, b2: &dyn RemoteBackend) {
     assert_eq!(remote_tabs(b2).unwrap(), vec![tab]);
     r2.add_known_tab(tab).unwrap();
     let s = sync_tab(&mut r2, tab, b2, &k2).unwrap();
-    assert_eq!(s.pulled, 5);
+    assert_eq!(s.pulled, 6);
 
     r1.set_title(a, "one").unwrap();
     r2.add_task(tab, Place::LastChildOf(Some(a)), "child").unwrap();
