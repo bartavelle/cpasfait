@@ -17,14 +17,15 @@ pub enum RemoteConfig {
 
 impl RemoteConfig {
     /// Parse a user-supplied remote: `gdrive:FOLDER-ID` (or a Drive folder URL),
-    /// `rsync:[user@]host:path`, otherwise a directory path (`~/` is expanded).
+    /// `rsync:[user@]host:path` (an empty path is the login directory, or the
+    /// root of an rrsync-restricted key), otherwise a directory path (`~/` is expanded).
     pub fn parse(spec: &str) -> Result<Self, String> {
         let spec = spec.trim();
         if let Some(target) = spec.strip_prefix("rsync:") {
             let target = target.trim();
             let ok = match target.split_once(':') {
                 Some((host, path)) => {
-                    !host.is_empty() && !path.is_empty() && !host.contains('/') && !host.starts_with('-')
+                    !host.is_empty() && !host.contains('/') && !host.starts_with('-') && !path.starts_with('-')
                 }
                 None => false,
             };
@@ -270,7 +271,8 @@ mod tests {
             assert_eq!(RemoteConfig::parse(&r.spec()).unwrap(), r);
         }
         assert!(RemoteConfig::parse("rsync:box:/srv/x").is_ok());
-        for bad in ["rsync:/local/path", "rsync:box:", "rsync::x", "rsync:-oProxy=x:y"] {
+        assert!(RemoteConfig::parse("rsync:box:").is_ok());
+        for bad in ["rsync:/local/path", "rsync::x", "rsync:-oProxy=x:y", "rsync:box:-x"] {
             assert!(RemoteConfig::parse(bad).is_err(), "{bad}");
         }
     }

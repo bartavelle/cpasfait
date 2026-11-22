@@ -14,15 +14,26 @@ fn have_rsync() -> bool {
     std::process::Command::new("rsync").arg("--version").output().is_ok()
 }
 
-/// An `ssh` that drops its options and the host name, then runs the command here.
+/// An `ssh` that drops its options and the host name, then runs the command
+/// here (through `rrsync ROOT` when given, as a restricted key would).
 fn fake_ssh(dir: &Path) -> String {
+    fake_ssh_with(dir, None)
+}
+
+fn fake_ssh_with(dir: &Path, rrsync_root: Option<&Path>) -> String {
     let p = dir.join("fake-ssh");
+    let run = match rrsync_root {
+        Some(root) => format!("SSH_ORIGINAL_COMMAND=\"$*\" exec rrsync '{}'", root.display()),
+        None => "exec sh -c \"$*\"".to_owned(),
+    };
     std::fs::write(
         &p,
-        "#!/bin/sh\n\
-         while [ $# -gt 0 ]; do case \"$1\" in -o|-p|-l) shift 2;; -*) shift;; *) break;; esac; done\n\
-         shift\n\
-         exec sh -c \"$*\"\n",
+        format!(
+            "#!/bin/sh\n\
+             while [ $# -gt 0 ]; do case \"$1\" in -o|-p|-l) shift 2;; -*) shift;; *) break;; esac; done\n\
+             shift\n\
+             {run}\n"
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -88,4 +99,35 @@ fn unreachable_host_is_an_error() {
     assert!(b.put_new("t/ops/d/1.seg", b"x").is_err());
     // the failed upload is not left in the mirror, so a retry uploads it
     assert!(!tmp.path().join("m/t/ops/d/1.seg").exists());
+}
+
+/// A key restricted with `command="rrsync /srv/cpasfait",restrict`: only
+/// rsync runs, paths are relative to the rrsync root.
+#[test]
+fn rrsync_restricted_key() {
+    if !have_rsync() || std::process::Command::new("rrsync").arg("-help").output().is_err() {
+        eprintln!("rsync or rrsync not installed: skipped");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("srv");
+    std::fs::create_dir(&root).unwrap();
+    let ssh = fake_ssh_with(tmp.path(), Some(&root));
+    for (spec, dir) in [("me@h:", root.clone()), ("me@h:team", root.join("team"))] {
+        let m = tempfile::tempdir().unwrap();
+        let b = Rsync::new(spec, m.path().join("m1")).with_ssh(&ssh);
+        assert_eq!(b.list("t/ops").unwrap(), Vec::<String>::new(), "{spec}");
+        b.put_new("t/ops/d/1.seg", b"x").unwrap();
+        assert_eq!(std::fs::read(dir.join("t/ops/d/1.seg")).unwrap(), b"x");
+        let b2 = Rsync::new(spec, m.path().join("m2")).with_ssh(&ssh);
+        assert_eq!(b2.list("t/ops").unwrap(), vec!["t/ops/d/1.seg"]);
+        assert_eq!(b2.list("").unwrap(), vec!["t/ops/d/1.seg"]);
+    }
+    // Missing parents cannot be created through rrsync: a clear error.
+    let m = tempfile::tempdir().unwrap();
+    let b = Rsync::new("me@h:a/b", m.path()).with_ssh(&ssh);
+    match b.put_new("t/x", b"x") {
+        Err(cpasfait_core::Error::Backend(e)) => assert!(e.contains("No such file or directory"), "{e}"),
+        other => panic!("{other:?}"),
+    }
 }

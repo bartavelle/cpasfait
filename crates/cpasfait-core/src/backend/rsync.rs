@@ -13,6 +13,12 @@
 //! hardware keys and `known_hosts` apply. ssh runs in batch mode (sync runs
 //! in the background, it cannot prompt): use ssh-agent or a key without a
 //! passphrase.
+//!
+//! Only `rsync --server` commands are run on the remote side, except when
+//! the remote directory's parent is missing (then `mkdir -p` first), so a key
+//! restricted with rrsync (`command="rrsync /srv/cpasfait",restrict` in
+//! `authorized_keys`) works; the remote path is then relative to that root
+//! (`rsync:host:` for the root itself).
 
 use super::RemoteBackend;
 use super::localdir::LocalDir;
@@ -48,8 +54,13 @@ impl Rsync {
             Some((host, path)) if !host.contains('/') => format!("{host}:{path}"),
             _ => remote.to_owned(),
         };
+        let mut remote = remote.trim_end_matches('/').to_owned();
+        // `host:` (the login or rrsync root directory): `host:/x` would be absolute.
+        if remote.ends_with(':') {
+            remote.push('.');
+        }
         Rsync {
-            remote: remote.trim_end_matches('/').to_owned(),
+            remote,
             mirror: LocalDir::new(&mirror_root),
             mirror_root,
             ssh: SSH.to_owned(),
@@ -148,21 +159,25 @@ impl Rsync {
 
     /// Upload one mirror file (creating its directories on the remote).
     fn push(&self, rel: &str) -> Result<()> {
-        // `-R` recreates the relative path under the destination, which must
-        // exist: create it first.
-        let mkdir;
-        let mut args = vec!["-R"];
-        match self.split_remote() {
-            Some((_, path)) => {
-                let path = if path.is_empty() { "." } else { path };
-                mkdir = format!("--rsync-path=mkdir -p '{}' && rsync", path.replace('\'', "'\\''"));
-                args.push(&mkdir);
-            }
-            None => std::fs::create_dir_all(&self.remote)?,
-        }
+        // `-R` recreates the relative path under the destination; rsync
+        // creates the destination itself, but not its missing parents.
         let dst = self.remote_path("");
-        args.extend([rel, dst.as_str()]);
-        self.rsync(&args, Some(&self.mirror_root))
+        let Some((_, path)) = self.split_remote() else {
+            std::fs::create_dir_all(&self.remote)?;
+            return self.rsync(&["-R", rel, &dst], Some(&self.mirror_root));
+        };
+        match self.rsync(&["-R", rel, &dst], Some(&self.mirror_root)) {
+            Err(Error::Backend(m)) if m.contains("No such file or directory") => {
+                // Not possible through rrsync, which only runs rsync.
+                let mkdir = format!("--rsync-path=mkdir -p '{}' && rsync", path.replace('\'', "'\\''"));
+                self.rsync(&["-R", &mkdir, rel, &dst], Some(&self.mirror_root))
+                    .map_err(|e| match e {
+                        Error::Backend(m2) => Error::Backend(format!("{m} (then, creating the directory: {m2})")),
+                        e => e,
+                    })
+            }
+            other => other,
+        }
     }
 }
 
@@ -222,6 +237,9 @@ mod tests {
         assert_eq!(r("me@box:~/cpasfait/"), "me@box:cpasfait");
         assert_eq!(r("box:/srv/x"), "box:/srv/x");
         assert_eq!(r("/local/a:~/b"), "/local/a:~/b");
+        assert_eq!(r("box:"), "box:.");
+        assert_eq!(r("box:~/"), "box:.");
+        assert_eq!(Rsync::new("box:", m.path()).remote_path("t"), "box:./t");
         let b = Rsync::new("box:x", m.path());
         assert_eq!(b.split_remote(), Some(("box", "x")));
         assert_eq!(Rsync::new("/srv/a:b", m.path()).split_remote(), None);

@@ -131,6 +131,13 @@ friend's server) can hold shared tabs; its owner cannot read them.
   directory.
 - A copy of the remote, encrypted, is kept in `<data dir>/mirrors/`; it can
   be deleted at any time.
+- A key restricted to rsync works: with
+  `command="/usr/bin/rrsync /srv/cpasfait",restrict ssh-ed25519 AAAA…` in the
+  server's `authorized_keys`, paths are relative to `/srv/cpasfait`
+  (`rsync:cpasfait@box:` for that directory itself, `rsync:cpasfait@box:team`
+  for a subdirectory, created if missing). Only one missing level can be
+  created through rrsync. To check such a remote by hand (`ssh` itself is
+  refused): `rsync --list-only -e "ssh -o BatchMode=yes" cpasfait@box:./`
 
 ### Sharing through Google Drive
 
