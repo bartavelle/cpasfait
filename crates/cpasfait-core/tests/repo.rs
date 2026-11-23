@@ -350,3 +350,45 @@ fn tasks_record_their_author() {
     assert_eq!(author(a), "alice");
     assert_eq!(author(b), "alice <alice@example.org>");
 }
+
+#[test]
+fn work_times_entered_afterwards() {
+    let (mut r, time) = repo_with_clock();
+    let start = time.load(Ordering::SeqCst);
+    let min = 60_000;
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
+    r.start_work(a).unwrap();
+    time.fetch_add(60 * min, Ordering::SeqCst);
+    // forgot to switch to b 20 minutes ago
+    assert!(r.start_work_at(b, start - min).is_err());
+    assert!(r.start_work_at(b, start + 61 * min).is_err());
+    r.start_work_at(b, start + 40 * min).unwrap();
+    assert_eq!(r.sessions_for_task(a).unwrap()[0].end, Some(start + 40 * min));
+    let sb = r.active_session().unwrap().unwrap();
+    assert_eq!((sb.task, sb.start), (Some(b), Some(start + 40 * min)));
+    // and to stop 5 minutes ago
+    assert!(r.stop_work_at(start + 39 * min).is_err());
+    assert_eq!(r.active_session().unwrap().map(|s| s.id), Some(sb.id));
+    assert_eq!(r.stop_work_at(start + 55 * min).unwrap(), vec![sb.id]);
+    assert_eq!(r.sessions_for_task(b).unwrap()[0].duration_ms(0), 15 * min);
+    // nothing running: a back-dated start
+    r.start_work_at(a, start + 58 * min).unwrap();
+    assert_eq!(r.active_session().unwrap().unwrap().start, Some(start + 58 * min));
+}
+
+#[test]
+fn back_dated_start_cannot_overlap_the_last_session() {
+    let (mut r, time) = repo_with_clock();
+    let t0 = time.load(Ordering::SeqCst);
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    r.start_work(a).unwrap();
+    time.fetch_add(60_000, Ordering::SeqCst);
+    r.stop_work().unwrap();
+    assert_eq!(r.last_work_end().unwrap(), Some(t0 + 60_000));
+    time.fetch_add(60_000, Ordering::SeqCst);
+    assert!(r.start_work_at(a, t0 + 30_000).is_err());
+    r.start_work_at(a, t0 + 60_000).unwrap();
+}

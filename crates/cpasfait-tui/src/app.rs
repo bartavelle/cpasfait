@@ -8,6 +8,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use cpasfait_core::backend;
 use cpasfait_core::crypto::Identity;
 use cpasfait_core::dates::{parse_date, today_local};
+use cpasfait_core::report::fmt_duration;
 use cpasfait_core::sync::{invited_to, remote_tabs, sync_tab};
 use cpasfait_core::{Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -671,14 +672,20 @@ impl App {
                     });
                 }
             }
+            // Both open the command line, prefilled with the current time, to edit.
             StopWork => {
-                let stopped = self.repo.stop_work()?;
-                self.refresh()?;
-                self.info(if stopped.is_empty() {
-                    "nothing running"
+                if self.active.is_none() {
+                    self.info("nothing running");
                 } else {
-                    "stopped"
-                });
+                    let now = self.fmt_time(self.repo.now_ms());
+                    self.mode = Mode::Command(LineEditor::new(&format!("stop {now}")));
+                }
+            }
+            SwitchWork => {
+                if sel.is_some() {
+                    let now = self.fmt_time(self.repo.now_ms());
+                    self.mode = Mode::Command(LineEditor::new(&format!("switch {now}")));
+                }
             }
             // `select` unfolds the ancestors; they can't be done (see `Tree::next_task`).
             JumpNext => match self.next {
@@ -740,6 +747,54 @@ impl App {
 
     // -------------------------------------------------------------- commands
 
+    /// A moment as shown to (and typed by) the user: `14:30`, or with the
+    /// date when not today.
+    fn fmt_time(&self, ms: i64) -> String {
+        let Ok(t) = jiff::Timestamp::from_millisecond(ms) else {
+            return ms.to_string();
+        };
+        let z = t.to_zoned_datetime(self.tz.clone());
+        let today = jiff::Timestamp::from_millisecond(self.repo.now_ms())
+            .map(|n| n.to_zoned_datetime(self.tz.clone()).date())
+            .ok();
+        if Some(z.date()) == today {
+            z.strftime("%H:%M").to_string()
+        } else {
+            z.strftime("%Y-%m-%d %H:%M").to_string()
+        }
+    }
+
+    /// A time typed after `:stop` / `:switch` (empty: now).
+    fn parse_when(&self, arg: &str) -> Result<i64> {
+        if arg.is_empty() {
+            return Ok(self.repo.now_ms());
+        }
+        let at = cpasfait_core::dates::parse_time(arg, self.repo.now_ms(), &self.tz)
+            .ok_or_else(|| anyhow!("can't parse time {arg:?} (14:30, -20m, yesterday 18:00)"))?;
+        if at > self.repo.now_ms() {
+            bail!("{} is in the future", self.fmt_time(at));
+        }
+        Ok(at)
+    }
+
+    fn check_after_start(&self, s: &Session, at: i64, title: &str) -> Result<()> {
+        match s.start {
+            Some(start) if at < start => bail!(
+                "{} is before {title:?} started ({})",
+                self.fmt_time(at),
+                self.fmt_time(start)
+            ),
+            _ => Ok(()),
+        }
+    }
+
+    fn session_title(&self, s: &Session) -> String {
+        s.task
+            .and_then(|t| self.repo.task(t).ok())
+            .map(|t| t.title)
+            .unwrap_or_else(|| "(unknown task)".into())
+    }
+
     pub fn run_command(&mut self, line: &str) -> Result<()> {
         let line = line.trim();
         let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
@@ -800,6 +855,46 @@ impl App {
                 }
                 self.repo.set_title(t, arg)?;
                 self.refresh()?;
+            }
+            "stop" => {
+                let at = self.parse_when(arg)?;
+                let Some(s) = self.repo.active_session()? else {
+                    bail!("nothing running");
+                };
+                let title = self.session_title(&s);
+                self.check_after_start(&s, at, &title)?;
+                self.repo.stop_work_at(at)?;
+                self.refresh()?;
+                let worked = fmt_duration(at - s.start.unwrap_or(at));
+                self.info(format!("stopped {title:?} at {} ({worked})", self.fmt_time(at)));
+            }
+            "switch" => {
+                let task = need_task(self)?;
+                let at = self.parse_when(arg)?;
+                let title = self.tree.get(task).map(|t| t.title.clone()).unwrap_or_default();
+                let previous = self.repo.active_session()?;
+                let mut msg = String::new();
+                if let Some(s) = &previous {
+                    if s.task == Some(task) {
+                        bail!("already working on {title:?}");
+                    }
+                    let prev = self.session_title(s);
+                    self.check_after_start(s, at, &prev)?;
+                    msg = format!(", {prev:?} stopped ({})", fmt_duration(at - s.start.unwrap_or(at)));
+                }
+                if previous.is_none()
+                    && let Some(end) = self.repo.last_work_end()?
+                    && at < end
+                {
+                    bail!(
+                        "{} is before your last session ended ({})",
+                        self.fmt_time(at),
+                        self.fmt_time(end)
+                    );
+                }
+                self.repo.start_work_at(task, at)?;
+                self.refresh()?;
+                self.info(format!("working on {title:?} since {}{msg}", self.fmt_time(at)));
             }
             "worknote" => {
                 let session = match &self.active {

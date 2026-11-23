@@ -32,6 +32,7 @@ pub enum Action {
     PriorityDown,
     ToggleWork,
     StopWork,
+    SwitchWork,
     JumpNext,
     JumpActive,
     ToggleHideDone,
@@ -85,6 +86,7 @@ const BINDINGS: &[(&str, Action)] = &[
     ("-", Action::PriorityDown),
     ("s", Action::ToggleWork),
     ("S", Action::StopWork),
+    ("W", Action::SwitchWork),
     ("gn", Action::JumpNext),
     ("gs", Action::JumpActive),
     ("H", Action::ToggleHideDone),
@@ -145,7 +147,8 @@ Editing       n        new task (beside this one)       a      new subtask
               x Space  toggle done   dd  delete          u      undo delete
               >>/<<    indent/outdent       (tasks are sorted by score: + - :due)
               +/-      priority up/down                 t      edit tags
-Work log      s        start/stop working on the task   S      stop any running work
+Work log      s        start/stop working on the task   S      stop running work at…
+              W        switch to this task at…  (:stop / :switch TIME: 14:30, -20m, yesterday 18:00)
 View          H        hide/show done tasks             D      toggle detail pane
               T        time spent box: hidden → today → this week → this month
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b

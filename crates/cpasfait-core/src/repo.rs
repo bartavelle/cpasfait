@@ -956,8 +956,25 @@ impl Repo {
     /// Start working on `task`, closing any other open session of this device.
     /// No-op if already working on it. Returns the active session id.
     pub fn start_work(&mut self, task: TaskId) -> Result<SessionId> {
+        self.start_work_impl(task, self.now_ms())
+    }
+
+    /// Like [`Repo::start_work`], from `at` (Unix ms, not in the future): the
+    /// other sessions running on this device end at `at` ("I switched to
+    /// this at 14:00"). Already working on `task`: nothing changes.
+    pub fn start_work_at(&mut self, task: TaskId, at: i64) -> Result<SessionId> {
+        self.check_work_time(at)?;
+        if self.open_sessions_of_device()?.is_empty()
+            && let Some(end) = self.last_work_end()?
+            && at < end
+        {
+            return Err(Error::Invalid("that is before the end of the last session".into()));
+        }
+        self.start_work_impl(task, at)
+    }
+
+    fn start_work_impl(&mut self, task: TaskId, now: i64) -> Result<SessionId> {
         let t = self.task(task)?;
-        let now = self.now_ms();
         let mut edits = vec![];
         let mut current = None;
         for s in self.open_sessions_of_device()? {
@@ -986,7 +1003,16 @@ impl Repo {
 
     /// Stop all open sessions of this device. Returns the stopped sessions.
     pub fn stop_work(&mut self) -> Result<Vec<SessionId>> {
-        let now = self.now_ms();
+        self.stop_work_impl(self.now_ms())
+    }
+
+    /// Like [`Repo::stop_work`], at `at` (Unix ms, not in the future).
+    pub fn stop_work_at(&mut self, at: i64) -> Result<Vec<SessionId>> {
+        self.check_work_time(at)?;
+        self.stop_work_impl(at)
+    }
+
+    fn stop_work_impl(&mut self, now: i64) -> Result<Vec<SessionId>> {
         let open = self.open_sessions_of_device()?;
         let ids = open.iter().map(|s| s.id).collect();
         self.commit(
@@ -995,6 +1021,31 @@ impl Repo {
                 .collect(),
         )?;
         Ok(ids)
+    }
+
+    /// When this device's last finished session ended (Unix ms).
+    pub fn last_work_end(&self) -> Result<Option<i64>> {
+        Ok(self.conn.query_row(
+            "SELECT max(end) FROM session WHERE device = ?1 AND deleted = 0",
+            params![self.device.to_string()],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// `at` as the end of the running sessions: not in the future, not before
+    /// any of them started.
+    fn check_work_time(&self, at: i64) -> Result<()> {
+        if at > self.now_ms() {
+            return Err(Error::Invalid("that time is in the future".into()));
+        }
+        if self
+            .open_sessions_of_device()?
+            .iter()
+            .any(|s| s.start.is_some_and(|st| at < st))
+        {
+            return Err(Error::Invalid("that is before the running session started".into()));
+        }
+        Ok(())
     }
 
     /// Start working on `task` unless already doing so, in which case stop.

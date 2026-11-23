@@ -261,11 +261,11 @@ fn time_box_cycles_periods() {
     set(at(1, 9, 0)); // Wednesday the 1st: this month only
     press(&mut app, "Gs");
     set(at(1, 9, 30));
-    press(&mut app, "S");
+    press(&mut app, "S<enter>");
     set(at(13, 9, 0)); // Monday the 13th: this week
     press(&mut app, "ggjjs");
     set(at(13, 12, 0));
-    press(&mut app, "S");
+    press(&mut app, "S<enter>");
     set(at(14, 8, 0)); // Tuesday the 14th: today
     press(&mut app, "ggs");
     set(at(14, 8, 40));
@@ -636,4 +636,63 @@ fn help_scrolls() {
     assert!(!screen(&mut app, 100, 12).contains("Navigation"));
     press(&mut app, "q");
     assert!(matches!(app.mode, Mode::Normal));
+}
+
+#[test]
+fn stop_and_switch_at_a_given_time() {
+    let (mut app, time) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
+    let at = |h: i8, m: i8| {
+        jiff::civil::date(2023, 11, 14)
+            .at(h, m, 0, 0)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            .unwrap()
+            .timestamp()
+            .as_millisecond()
+    };
+    let set = |t: i64| time.store(t, Ordering::SeqCst);
+    press(&mut app, "nAlpha<enter>nBeta<enter>gg");
+    let (alpha, beta) = (app.rows[0].id, app.rows[1].id);
+    press(&mut app, "S");
+    assert_eq!(message(&app), "nothing running");
+
+    set(at(9, 0));
+    press(&mut app, "s"); // Alpha
+    set(at(11, 0));
+    // W: the command line, prefilled with the time, to edit
+    press(&mut app, "jW");
+    let Mode::Command(editor) = &app.mode else { panic!() };
+    assert_eq!(editor.text(), "switch 11:00");
+    press(&mut app, "<bs><bs><bs><bs><bs>08:00<enter>");
+    assert_eq!(message(&app), "08:00 is before \"Alpha\" started (09:00)");
+    press(&mut app, ":switch 10:30<enter>");
+    assert_eq!(
+        message(&app),
+        "working on \"Beta\" since 10:30, \"Alpha\" stopped (1h30)"
+    );
+    assert_eq!(app.repo.sessions_for_task(alpha).unwrap()[0].end, Some(at(10, 30)));
+    press(&mut app, ":switch<enter>");
+    assert_eq!(message(&app), "already working on \"Beta\"");
+
+    set(at(12, 0));
+    press(&mut app, "S");
+    let Mode::Command(editor) = &app.mode else { panic!() };
+    assert_eq!(editor.text(), "stop 12:00");
+    press(&mut app, "<esc>:stop -1h<enter>");
+    assert_eq!(message(&app), "stopped \"Beta\" at 11:00 (30m)");
+    assert!(app.repo.active_session().unwrap().is_none());
+    assert_eq!(app.repo.sessions_for_task(beta).unwrap()[0].end, Some(at(11, 0)));
+    press(&mut app, ":stop<enter>");
+    assert_eq!(message(&app), "nothing running");
+    press(&mut app, ":switch noon<enter>");
+    assert!(message(&app).starts_with("can't parse time"), "{}", message(&app));
+    // nothing running: a back-dated start, not overlapping the last session
+    // (a time not yet reached today is yesterday)
+    press(&mut app, ":switch 23:00<enter>");
+    assert_eq!(
+        message(&app),
+        "2023-11-13 23:00 is before your last session ended (11:00)"
+    );
+    press(&mut app, "k:switch 11:15<enter>");
+    assert_eq!(message(&app), "working on \"Alpha\" since 11:15");
 }
