@@ -760,11 +760,11 @@ fn edit_task_in_editor() {
     assert!(text.contains("\n2023-11-14 22:13:20 - 2023-11-14 23:13:20\n"), "{text}");
     let edited = text.replace("title: Alpha", "title: Alpha 2") + "2023-11-14 20:00 - 2023-11-14 2l:00\n";
     app.finish_task_edit(task, Ok(edited));
-    assert!(message(&app).starts_with("line 10: expected"), "{}", message(&app));
+    assert!(message(&app).starts_with("line 11: expected"), "{}", message(&app));
     assert_eq!(app.repo.task(task).unwrap().title, "Alpha");
     // the next edit shows the failed text, with the error
     let again = app.task_file(task).unwrap();
-    assert!(again.starts_with("# error: line 10: expected"), "{again}");
+    assert!(again.starts_with("# error: line 11: expected"), "{again}");
     let fixed = again.replace("2l:00", "21:00");
     app.finish_task_edit(task, Ok(fixed));
     assert_eq!(message(&app), "title changed, 1 session added");

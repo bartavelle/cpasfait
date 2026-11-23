@@ -39,6 +39,8 @@ pub struct TaskFile {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Applied {
     pub title: bool,
+    /// Lines merged into another one because they overlapped.
+    pub merged: usize,
     pub added: usize,
     pub changed: usize,
     pub deleted: usize,
@@ -50,7 +52,7 @@ impl std::fmt::Display for Applied {
         if self.title {
             parts.push("title changed".to_owned());
         }
-        for (n, what) in [(self.added, "added"), (self.changed, "changed"), (self.deleted, "deleted")] {
+        for (n, what) in [(self.merged, "merged (overlapping)"), (self.added, "added"), (self.changed, "changed"), (self.deleted, "deleted")] {
             if n > 0 {
                 parts.push(format!("{n} session{} {what}", if n > 1 { "s" } else { "" }));
             }
@@ -89,6 +91,7 @@ pub fn render(repo: &Repo, task: TaskId, tz: &TimeZone) -> Result<String> {
          # Work log: one session per line, \"start - end\" in local time ({}).\n\
          # Change a line to correct it, delete it to delete the session, add one\n\
          # to log time. The running session has no end. Seconds are optional.\n\
+         # Overlapping sessions are merged into one.\n\
          # Lines starting with #, and anything after a # on a session line, are\n\
          # ignored. Save an empty file to cancel.\n\
          work log:\n",
@@ -180,8 +183,31 @@ pub fn parse(text: &str, tz: &TimeZone) -> Result<Option<TaskFile>> {
     Ok(Some(TaskFile { title, work }))
 }
 
+/// The sessions sorted, overlapping ones merged into one (touching ones stay
+/// apart: stopping and restarting makes those). A span without an end runs
+/// until now, so it absorbs everything after its start. Each span keeps the
+/// line number of its first line.
+pub fn merge(work: &[(usize, Span)]) -> Vec<(usize, Span)> {
+    let mut sorted = work.to_vec();
+    sorted.sort_by_key(|(_, s)| s.start);
+    let mut out: Vec<(usize, Span)> = vec![];
+    for (n, span) in sorted {
+        match out.last_mut() {
+            Some((_, last)) if last.end.is_none_or(|e| span.start < e) => {
+                last.end = match (last.end, span.end) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    _ => None,
+                };
+            }
+            _ => out.push((n, span)),
+        }
+    }
+    out
+}
+
 /// Record the differences between `task` and `file`, all at once (nothing
-/// is changed on error). Lines identical to an existing session leave it
+/// is changed on error). Overlapping lines are first merged (see [`merge`]).
+/// Lines identical to an existing session leave it
 /// alone; changed lines update the remaining sessions in time order (keeping
 /// their user and note); extra lines are new sessions of this device; missing
 /// ones are deleted. Only the running session can stay without an end.
@@ -202,9 +228,11 @@ pub fn apply(repo: &mut Repo, task: TaskId, file: &TaskFile) -> Result<Applied> 
         .collect();
     old.sort_by_key(|s| s.start);
     let key = |start: i64, end: Option<i64>| (secs(start), end.map(secs));
+    let work = merge(&file.work);
+    done.merged = file.work.len() - work.len();
     // Unchanged lines.
     let mut new: Vec<(usize, Span)> = vec![];
-    for &(n, span) in &file.work {
+    for &(n, span) in &work {
         match old.iter().position(|s| key(s.start.unwrap_or_default(), s.end) == key(span.start, span.end)) {
             Some(i) => {
                 old.remove(i);

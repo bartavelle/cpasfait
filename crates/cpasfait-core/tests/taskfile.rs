@@ -83,6 +83,7 @@ fn render_and_edit() {
         applied,
         Applied {
             title: true,
+            merged: 0,
             added: 1,
             changed: 1,
             deleted: 0
@@ -154,4 +155,49 @@ fn other_users_sessions_are_labelled() {
     let text = taskfile::render(&r, a, &TimeZone::UTC).unwrap();
     assert!(text.contains("2026-11-23 09:00:00 - 2026-11-23 10:00:00  # bob"), "{text}");
     assert_eq!(edit(&mut r, a, |t| t).unwrap(), Applied::default());
+}
+
+#[test]
+fn overlapping_sessions_are_merged() {
+    use taskfile::{Span, merge};
+    let w = |v: &[(i64, Option<i64>)]| -> Vec<(usize, Span)> {
+        v.iter().enumerate().map(|(i, &(start, end))| (i + 1, Span { start, end })).collect()
+    };
+    let spans = |v: Vec<(usize, Span)>| v.into_iter().map(|(_, s)| (s.start, s.end)).collect::<Vec<_>>();
+    // unordered, nested, overlapping, touching, separate
+    assert_eq!(
+        spans(merge(&w(&[(50, Some(60)), (0, Some(10)), (5, Some(8)), (8, Some(20)), (20, Some(30))]))),
+        [(0, Some(20)), (20, Some(30)), (50, Some(60))]
+    );
+    // a running session absorbs everything after its start
+    assert_eq!(
+        spans(merge(&w(&[(10, None), (0, Some(12)), (30, Some(40)), (-10, Some(-5))]))),
+        [(-10, Some(-5)), (0, None)]
+    );
+    assert_eq!(merge(&w(&[(0, Some(1)), (5, Some(6))]))[1].0, 2);
+
+    let (mut r, time) = setup();
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    r.start_work(a).unwrap(); // 09:00
+    time.store(ms("2026-11-23T10:00:00"), Ordering::SeqCst);
+    r.stop_work().unwrap();
+    time.store(ms("2026-11-23T12:00:00"), Ordering::SeqCst);
+    let applied = edit(&mut r, a, |t| {
+        t + "2026-11-23 09:30 - 2026-11-23 10:30\n2026-11-23 08:00 - 2026-11-23 08:30\n2026-11-23 08:20 - 2026-11-23 08:45\n"
+    })
+    .unwrap();
+    assert_eq!((applied.merged, applied.added, applied.changed), (2, 1, 1));
+    assert_eq!(
+        spans_of(&r, a),
+        [
+            (ms("2026-11-23T08:00"), Some(ms("2026-11-23T08:45"))),
+            (ms("2026-11-23T09:00"), Some(ms("2026-11-23T10:30"))),
+        ]
+    );
+    assert_eq!(applied.to_string(), "2 sessions merged (overlapping), 1 session added, 1 session changed");
+}
+
+fn spans_of(r: &Repo, task: cpasfait_core::TaskId) -> Vec<(i64, Option<i64>)> {
+    spans(r, task)
 }
