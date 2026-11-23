@@ -107,10 +107,10 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
                         app.error(format!("{e:#}"));
                     }
                 }
-                Request::EditTask(task) => match app.task_file(task) {
-                    Ok(text) => {
+                Request::EditTask(task, since) => match app.task_file(task, since) {
+                    Ok((text, since)) => {
                         let edited = run_editor(terminal, &text, "txt").map_err(|e| format!("{e:#}"));
-                        app.finish_task_edit(task, edited);
+                        app.finish_task_edit(task, since, edited);
                     }
                     Err(e) => app.error(format!("{e:#}")),
                 },

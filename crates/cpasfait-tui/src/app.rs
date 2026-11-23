@@ -46,12 +46,16 @@ pub struct Message {
     pub error: bool,
 }
 
+/// `E` shows the sessions of the last this many days.
+pub const EDIT_DAYS: i64 = 30;
+
 /// Requests the app makes to the outer loop (things needing the terminal or threads).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     EditNotes(TaskId),
-    /// Title and work log in the editor (see [`App::task_file`]).
-    EditTask(TaskId),
+    /// Title and work log in the editor (see [`App::task_file`]), sessions
+    /// ending after the given time (Unix ms) only.
+    EditTask(TaskId, Option<i64>),
     Sync,
 }
 
@@ -91,7 +95,7 @@ pub struct App {
     pub requests: Vec<Request>,
     /// A task file whose changes could not be applied, offered again on the
     /// next edit of that task.
-    failed_edit: Option<(TaskId, String)>,
+    failed_edit: Option<(TaskId, Option<i64>, String)>,
     pub quit: bool,
     deleted_stack: Vec<TaskId>,
     data_version: i64,
@@ -610,7 +614,7 @@ impl App {
             }
             EditTask => {
                 if let Some(id) = sel {
-                    self.requests.push(Request::EditTask(id));
+                    self.requests.push(Request::EditTask(id, self.edit_since(None)?));
                 }
             }
             ToggleDone => {
@@ -804,18 +808,30 @@ impl App {
             .unwrap_or_else(|| "(unknown task)".into())
     }
 
-    /// The text to edit for `task`: its title and work log, or the last
-    /// edit of it that failed.
-    pub fn task_file(&mut self, task: TaskId) -> Result<String> {
+    /// Local midnight starting `day` (default: [`EDIT_DAYS`] days ago).
+    fn edit_since(&self, day: Option<jiff::civil::Date>) -> Result<Option<i64>> {
+        let day = match day {
+            Some(d) => d,
+            None => jiff::Timestamp::from_millisecond(self.repo.now_ms())?
+                .to_zoned_datetime(self.tz.clone())
+                .date()
+                .checked_sub(jiff::Span::new().days(EDIT_DAYS))?,
+        };
+        Ok(Some(day.to_zoned_datetime(self.tz.clone())?.timestamp().as_millisecond()))
+    }
+
+    /// The text to edit for `task` and the window it covers: its title and
+    /// work log since `since`, or the last edit of it that failed.
+    pub fn task_file(&mut self, task: TaskId, since: Option<i64>) -> Result<(String, Option<i64>)> {
         match self.failed_edit.take() {
-            Some((t, text)) if t == task => Ok(text),
-            _ => Ok(taskfile::render(&self.repo, task, &self.tz)?),
+            Some((t, since, text)) if t == task => Ok((text, since)),
+            _ => Ok((taskfile::render(&self.repo, task, &self.tz, since)?, since)),
         }
     }
 
     /// Apply an edited task file (an error: the editor failed, drop it). On
     /// error, the text is kept for the next edit, with the error on top.
-    pub fn finish_task_edit(&mut self, task: TaskId, text: std::result::Result<String, String>) {
+    pub fn finish_task_edit(&mut self, task: TaskId, since: Option<i64>, text: std::result::Result<String, String>) {
         let text = match text {
             Ok(t) => t,
             Err(e) => {
@@ -824,7 +840,7 @@ impl App {
             }
         };
         let res = taskfile::parse(&text, &self.tz).and_then(|f| match f {
-            Some(f) => taskfile::apply(&mut self.repo, task, &f).map(Some),
+            Some(f) => taskfile::apply(&mut self.repo, task, &f, since).map(Some),
             None => Ok(None),
         });
         match res {
@@ -845,7 +861,7 @@ impl App {
                     .filter(|l| !l.starts_with("# error: "))
                     .map(|l| format!("{l}\n"))
                     .collect();
-                self.failed_edit = Some((task, format!("# error: {e}\n{body}")));
+                self.failed_edit = Some((task, since, format!("# error: {e}\n{body}")));
                 self.error(format!("{e}: nothing changed, E to fix it"));
             }
         }
@@ -908,7 +924,16 @@ impl App {
             }
             "edit" => {
                 let t = need_task(self)?;
-                self.requests.push(Request::EditTask(t));
+                let since = match arg {
+                    "all" => None,
+                    "" => self.edit_since(None)?,
+                    d => {
+                        let d = parse_date(d, today_local())
+                            .ok_or_else(|| anyhow!("usage: :edit [all | DATE] (2026-10-01, -2m, ...)"))?;
+                        self.edit_since(Some(d))?
+                    }
+                };
+                self.requests.push(Request::EditTask(t, since));
             }
             "title" => {
                 let t = need_task(self)?;

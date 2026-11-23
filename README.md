@@ -47,7 +47,7 @@ Press `?` in the TUI for all keys. The essentials:
 - `>>`/`<<` indent or outdent, `+`/`-` priority
 - `s` start or stop working on the task (starting one stops the other)
 - Forgot to stop or switch? `S` stops what is running and `W` switches to the selected task, at a time you give: they open the command line prefilled with the current time (`:stop 14:32`, `:switch 14:32`), Enter to accept or edit it first. Times: `14:30` (a time not reached yet today is yesterday's), `-20m`, `-1h30`, `yesterday 18:00`, `2026-11-22 18:00`. With nothing running, `W` starts the task back-dated (not before your last session ended)
-- `E` (or `:edit`) opens the task's title and work log in `$VISUAL`/`$EDITOR`, like `task edit`:
+- `E` (or `:edit`) opens the task's title and work log of the last 30 days in `$VISUAL`/`$EDITOR`, like `task edit` (`:edit all` for the whole log, `:edit 2026-10-01` or `:edit -3m` from a date; older sessions are not shown and stay as they are):
 
   ```
   title: Write the report
@@ -60,6 +60,7 @@ Press `?` in the TUI for all keys. The essentials:
   Correct a line to fix a session, delete it to delete the session, add one to log time (seconds are optional; a running session has no end). Overlapping sessions are merged into one (sessions that only touch stay apart). Times are local, `#` starts a comment, and other members' sessions are labelled with their name. On save, all the changes are applied, or none: on an error (shown in the status line) pressing `E` again reopens your text with the error on top. An empty file, or an editor exiting with an error (vim's `:cq`), cancels
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
+- The details pane (`D`) shows the task's total time, today's and this week's, and its 8 latest sessions
 - `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`; deleted tasks and their subtasks are left out), in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
 - `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (-3 to 3, default 0)

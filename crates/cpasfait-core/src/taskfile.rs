@@ -77,15 +77,31 @@ fn secs(ms: i64) -> i64 {
     ms.div_euclid(1000)
 }
 
-/// The file for `task`: its title and work log (all users, oldest first).
-pub fn render(repo: &Repo, task: TaskId, tz: &TimeZone) -> Result<String> {
-    let t = repo.task(task)?;
-    let mut sessions: Vec<Session> = repo
+/// Whether `s` is in the file for a window starting at `since`: it has a
+/// start, and is running or ends after `since`.
+fn in_window(s: &Session, since: Option<i64>) -> bool {
+    s.start.is_some() && s.end.is_none_or(|e| since.is_none_or(|since| e > since))
+}
+
+/// `task`'s sessions in the window, oldest first.
+fn window(repo: &Repo, task: TaskId, since: Option<i64>) -> Result<Vec<Session>> {
+    let mut v: Vec<Session> = repo
         .sessions_for_task(task)?
         .into_iter()
-        .filter(|s| s.start.is_some())
+        .filter(|s| in_window(s, since))
         .collect();
-    sessions.sort_by_key(|s| s.start);
+    v.sort_by_key(|s| s.start);
+    Ok(v)
+}
+
+/// The file for `task`: its title and work log (all users, oldest first).
+/// With `since` (Unix ms), only the sessions running or ending after it:
+/// the older ones are left out, and [`apply`] (given the same `since`)
+/// leaves them alone.
+pub fn render(repo: &Repo, task: TaskId, tz: &TimeZone, since: Option<i64>) -> Result<String> {
+    let t = repo.task(task)?;
+    let sessions = window(repo, task, since)?;
+    let hidden = repo.sessions_for_task(task)?.len() - sessions.len();
     let mut out = format!(
         "title: {}\n\n\
          # Work log: one session per line, \"start - end\" in local time ({}).\n\
@@ -93,10 +109,19 @@ pub fn render(repo: &Repo, task: TaskId, tz: &TimeZone) -> Result<String> {
          # to log time. The running session has no end. Seconds are optional.\n\
          # Overlapping sessions are merged into one.\n\
          # Lines starting with #, and anything after a # on a session line, are\n\
-         # ignored. Save an empty file to cancel.\n\
+         # ignored. Save an empty file to cancel.\n{}\
          work log:\n",
         t.title.replace('\n', " "),
         tz.iana_name().unwrap_or("system time zone"),
+        match since {
+            Some(since) if hidden > 0 => format!(
+                "# Not shown (and left alone): {hidden} session{} ended before {}. :edit all\n\
+                 # shows everything, :edit DATE from that date.\n",
+                if hidden > 1 { "s" } else { "" },
+                fmt_ms(since, tz)
+            ),
+            _ => String::new(),
+        }
     );
     for s in &sessions {
         let start = fmt_ms(s.start.unwrap_or_default(), tz);
@@ -206,12 +231,13 @@ pub fn merge(work: &[(usize, Span)]) -> Vec<(usize, Span)> {
 }
 
 /// Record the differences between `task` and `file`, all at once (nothing
-/// is changed on error). Overlapping lines are first merged (see [`merge`]).
+/// is changed on error). Only the sessions [`render`] showed for `since` are
+/// compared with the lines: older ones stay as they are. Overlapping lines are first merged (see [`merge`]).
 /// Lines identical to an existing session leave it
 /// alone; changed lines update the remaining sessions in time order (keeping
 /// their user and note); extra lines are new sessions of this device; missing
 /// ones are deleted. Only the running session can stay without an end.
-pub fn apply(repo: &mut Repo, task: TaskId, file: &TaskFile) -> Result<Applied> {
+pub fn apply(repo: &mut Repo, task: TaskId, file: &TaskFile, since: Option<i64>) -> Result<Applied> {
     let t = repo.task(task)?;
     let now = repo.now_ms();
     let mut done = Applied::default();
@@ -221,12 +247,7 @@ pub fn apply(repo: &mut Repo, task: TaskId, file: &TaskFile) -> Result<Applied> 
         done.title = true;
     }
 
-    let mut old: Vec<Session> = repo
-        .sessions_for_task(task)?
-        .into_iter()
-        .filter(|s| s.start.is_some())
-        .collect();
-    old.sort_by_key(|s| s.start);
+    let mut old = window(repo, task, since)?;
     let key = |start: i64, end: Option<i64>| (secs(start), end.map(secs));
     let work = merge(&file.work);
     done.merged = file.work.len() - work.len();

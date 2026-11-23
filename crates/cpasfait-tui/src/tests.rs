@@ -762,29 +762,71 @@ fn edit_task_in_editor() {
     time.fetch_add(3_600_000, Ordering::SeqCst);
     press(&mut app, "s");
     let task = app.rows[0].id;
+    let ms = |s: &str| {
+        s.parse::<jiff::civil::DateTime>()
+            .unwrap()
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            .unwrap()
+            .timestamp()
+            .as_millisecond()
+    };
+    let month_ago = Some(ms("2023-10-15T00:00"));
     press(&mut app, "E");
-    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task)]);
+    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, month_ago)]);
     press(&mut app, ":edit<enter>");
-    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task)]);
+    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, month_ago)]);
+    press(&mut app, ":edit all<enter>");
+    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, None)]);
+    press(&mut app, ":edit 2023-11-01<enter>");
+    let since = Some(ms("2023-11-01T00:00"));
+    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, since)]);
+    press(&mut app, ":edit whenever<enter>");
+    assert!(message(&app).starts_with("usage: :edit"), "{}", message(&app));
 
-    let text = app.task_file(task).unwrap();
+    let (text, since) = app.task_file(task, since).unwrap();
     assert!(text.contains("\n2023-11-14 22:13:20 - 2023-11-14 23:13:20\n"), "{text}");
     let edited = text.replace("title: Alpha", "title: Alpha 2") + "2023-11-14 20:00 - 2023-11-14 2l:00\n";
-    app.finish_task_edit(task, Ok(edited));
+    app.finish_task_edit(task, since, Ok(edited));
     assert!(message(&app).starts_with("line 11: expected"), "{}", message(&app));
     assert_eq!(app.repo.task(task).unwrap().title, "Alpha");
     // the next edit shows the failed text, with the error
-    let again = app.task_file(task).unwrap();
+    // (with the window it was made with)
+    let (again, again_since) = app.task_file(task, None).unwrap();
+    assert_eq!(again_since, since);
     assert!(again.starts_with("# error: line 11: expected"), "{again}");
     let fixed = again.replace("2l:00", "21:00");
-    app.finish_task_edit(task, Ok(fixed));
+    app.finish_task_edit(task, since, Ok(fixed));
     assert_eq!(message(&app), "title changed, 1 session added");
     assert_eq!(app.repo.task(task).unwrap().title, "Alpha 2");
     assert_eq!(app.repo.sessions_for_task(task).unwrap().len(), 2);
     // back to the task's own text
-    assert!(!app.task_file(task).unwrap().contains("# error"));
-    app.finish_task_edit(task, Ok(String::new()));
+    assert!(!app.task_file(task, since).unwrap().0.contains("# error"));
+    app.finish_task_edit(task, since, Ok(String::new()));
     assert_eq!(message(&app), "empty file: nothing changed");
-    app.finish_task_edit(task, Err("editor exited with 1".into()));
+    app.finish_task_edit(task, since, Err("editor exited with 1".into()));
     assert_eq!(message(&app), "editor exited with 1: nothing changed");
+}
+
+#[test]
+fn detail_pane_shows_latest_sessions() {
+    let (mut app, time) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
+    // 2023-11-14 22:13:20 UTC: 12 sessions of 10 minutes, one per day back
+    press(&mut app, "nAdmin<enter>");
+    let task = app.rows[0].id;
+    let day = 86_400_000;
+    let t0 = time.load(Ordering::SeqCst);
+    for i in (0..12).rev() {
+        time.store(t0 - i * day, Ordering::SeqCst);
+        app.repo.start_work(task).unwrap();
+        time.store(t0 - i * day + 600_000, Ordering::SeqCst);
+        app.repo.stop_work().unwrap();
+    }
+    app.refresh().unwrap();
+    let s = screen(&mut app, 100, 30);
+    // Tuesday: this week is today and yesterday
+    assert!(s.contains("work log  total 2h00\n"), "{s}");
+    assert!(s.contains("today 10m · this week 20m"), "{s}");
+    assert_eq!(s.matches("10m alice").count(), 8, "{s}");
+    assert!(s.contains("… 4 older sessions, E to edit"), "{s}");
 }

@@ -339,13 +339,38 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.extend(t.notes.lines().map(|l| Line::raw(l.to_owned())));
         lines.push(Line::raw(""));
     }
-    let total: i64 = app.detail_sessions.iter().map(|s| s.duration_ms(now)).sum();
+    // Totals, then the latest sessions (the log of an always-running task
+    // grows long).
+    let since = |from: Option<i64>| -> i64 {
+        let from = from.unwrap_or(i64::MIN);
+        app.detail_sessions
+            .iter()
+            .filter_map(|s| {
+                let start = s.start?.max(from);
+                Some((s.end.unwrap_or(now) - start).max(0))
+            })
+            .sum()
+    };
+    let total = since(None);
     lines.push(Line::from(vec![
         "work log".underlined(),
         Span::raw(format!("  total {}", fmt_duration(total))),
     ]));
-    for s in app.detail_sessions.iter().take(50) {
+    if total > 0 {
+        let today = since(TimePeriod::Today.start(now, &app.tz));
+        let week = since(TimePeriod::Week.start(now, &app.tz));
+        lines.push(Line::from(
+            format!("today {} · this week {}", fmt_duration(today), fmt_duration(week)).dim(),
+        ));
+    }
+    for s in app.detail_sessions.iter().take(DETAIL_SESSIONS) {
         lines.push(session_line(s, now));
+    }
+    let older = app.detail_sessions.len().saturating_sub(DETAIL_SESSIONS);
+    if older > 0 {
+        lines.push(Line::from(
+            format!("… {older} older session{}, E to edit", if older > 1 { "s" } else { "" }).dim(),
+        ));
     }
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
@@ -377,6 +402,9 @@ pub fn dep_problem(state: DepState) -> Option<&'static str> {
         DepState::UnknownTab => Some("in a tab you don't have"),
     }
 }
+
+/// Sessions listed in the detail pane (the latest ones).
+const DETAIL_SESSIONS: usize = 8;
 
 fn session_line(s: &Session, now: i64) -> Line<'static> {
     let mut v = vec![

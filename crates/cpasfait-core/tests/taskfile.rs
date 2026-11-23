@@ -27,9 +27,9 @@ fn setup() -> (Repo, Arc<AtomicI64>) {
 }
 
 fn edit(r: &mut Repo, task: cpasfait_core::TaskId, f: impl Fn(String) -> String) -> cpasfait_core::Result<Applied> {
-    let text = f(taskfile::render(r, task, &TimeZone::UTC)?);
+    let text = f(taskfile::render(r, task, &TimeZone::UTC, None)?);
     let file = taskfile::parse(&text, &TimeZone::UTC)?.expect("not empty");
-    taskfile::apply(r, task, &file)
+    taskfile::apply(r, task, &file, None)
 }
 
 fn spans(r: &Repo, task: cpasfait_core::TaskId) -> Vec<(i64, Option<i64>)> {
@@ -55,7 +55,7 @@ fn render_and_edit() {
     r.set_session_note(s, "second part").unwrap();
     time.store(ms("2026-11-23T11:00:00"), Ordering::SeqCst);
 
-    let text = taskfile::render(&r, a, &TimeZone::UTC).unwrap();
+    let text = taskfile::render(&r, a, &TimeZone::UTC, None).unwrap();
     assert!(text.starts_with("title: Write report\n"), "{text}");
     let log: Vec<_> = text.lines().skip_while(|l| *l != "work log:").skip(1).collect();
     assert_eq!(
@@ -152,7 +152,7 @@ fn other_users_sessions_are_labelled() {
     time.store(ms("2026-11-23T10:00:00"), Ordering::SeqCst);
     r.stop_work().unwrap();
     r.set_user("me").unwrap();
-    let text = taskfile::render(&r, a, &TimeZone::UTC).unwrap();
+    let text = taskfile::render(&r, a, &TimeZone::UTC, None).unwrap();
     assert!(text.contains("2026-11-23 09:00:00 - 2026-11-23 10:00:00  # bob"), "{text}");
     assert_eq!(edit(&mut r, a, |t| t).unwrap(), Applied::default());
 }
@@ -200,4 +200,34 @@ fn overlapping_sessions_are_merged() {
 
 fn spans_of(r: &Repo, task: cpasfait_core::TaskId) -> Vec<(i64, Option<i64>)> {
     spans(r, task)
+}
+
+#[test]
+fn only_recent_sessions() {
+    let (mut r, time) = setup();
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "admin").unwrap();
+    for (start, end) in [("2026-11-01T09:00", "2026-11-01T10:00"), ("2026-11-10T09:00", "2026-11-10T10:00")] {
+        time.store(ms(start), Ordering::SeqCst);
+        r.start_work(a).unwrap();
+        time.store(ms(end), Ordering::SeqCst);
+        r.stop_work().unwrap();
+    }
+    time.store(ms("2026-11-20T09:00"), Ordering::SeqCst);
+    r.start_work(a).unwrap(); // running
+    time.store(ms("2026-11-23T09:00"), Ordering::SeqCst);
+    let since = Some(ms("2026-11-05T00:00"));
+    let tz = TimeZone::UTC;
+    let text = taskfile::render(&r, a, &tz, since).unwrap();
+    assert!(text.contains("1 session ended before 2026-11-05 00:00:00"), "{text}");
+    assert!(!text.contains("2026-11-01 09:00:00 -"), "{text}");
+    // deleting all shown lines leaves the older session alone
+    let text: String = text.lines().filter(|l| !l.starts_with("2026")).map(|l| format!("{l}\n")).collect();
+    let file = taskfile::parse(&text, &tz).unwrap().unwrap();
+    let applied = taskfile::apply(&mut r, a, &file, since).unwrap();
+    assert_eq!(applied.deleted, 2);
+    assert_eq!(spans(&r, a), [(ms("2026-11-01T09:00"), Some(ms("2026-11-01T10:00")))]);
+    // without a window, everything is shown
+    let text = taskfile::render(&r, a, &tz, None).unwrap();
+    assert!(text.contains("2026-11-01 09:00:00 -") && !text.contains("Not shown"), "{text}");
 }
