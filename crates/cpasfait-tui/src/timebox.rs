@@ -65,9 +65,26 @@ pub struct TimeLine {
     pub ms: i64,
 }
 
+/// Whether `task` is deleted, or under a deleted parent.
+fn is_deleted(repo: &Repo, task: TaskId) -> bool {
+    let mut id = Some(task);
+    // Bounded: parent links may form a cycle before the tree repairs it.
+    for _ in 0..1000 {
+        let Some(t) = id.and_then(|i| repo.task(i).ok()) else {
+            return false;
+        };
+        if t.deleted {
+            return true;
+        }
+        id = t.parent;
+    }
+    false
+}
+
 /// Time logged directly on each task, in all tabs (all users), since the
-/// start of `period`, largest first. Parents are not credited with their
-/// subtasks' time, so the lines add up to the total. `tree` is the current
+/// start of `period`, largest first. Deleted tasks (and their subtasks) and
+/// closed tabs are left out. Parents are not credited with their subtasks'
+/// time, so the lines add up to the total. `tree` is the current
 /// tab's (`tab`); tasks of other tabs get their tab's name after the title.
 pub fn compute(
     repo: &Repo,
@@ -87,6 +104,15 @@ pub fn compute(
     };
     let mut per_task: HashMap<(TabId, Option<TaskId>), i64> = HashMap::new();
     for s in &slices {
+        let gone = !tabs.iter().any(|t| t.id == s.tab)
+            || match s.task {
+                Some(id) if s.tab == tab => tree.get(id).is_none() && is_deleted(repo, id),
+                Some(id) => is_deleted(repo, id),
+                None => false,
+            };
+        if gone {
+            continue;
+        }
         *per_task.entry((s.tab, s.task)).or_default() += s.ms();
     }
     let untitled = |t: &str| {
@@ -103,9 +129,8 @@ pub fn compute(
                 None => "(no task)".to_owned(),
                 Some(id) => match tree.get(id).filter(|_| task_tab == tab) {
                     Some(t) => untitled(&t.title),
-                    // Another tab's, or deleted (or hidden under a deleted parent).
+                    // Another tab's (deleted ones were left out above).
                     None => match repo.task(id) {
-                        Ok(t) if t.deleted || task_tab == tab => format!("{} (deleted)", untitled(&t.title)),
                         Ok(t) => untitled(&t.title),
                         Err(_) => "(unknown task)".to_owned(),
                     },

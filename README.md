@@ -60,7 +60,7 @@ Press `?` in the TUI for all keys. The essentials:
   Correct a line to fix a session, delete it to delete the session, add one to log time (seconds are optional; a running session has no end). Overlapping sessions are merged into one (sessions that only touch stay apart). Times are local, `#` starts a comment, and other members' sessions are labelled with their name. On save, all the changes are applied, or none: on an error (shown in the status line) pressing `E` again reopens your text with the error on top. An empty file, or an editor exiting with an error (vim's `:cq`), cancels
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
-- `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`), in a box at the lower right, cycling through hidden, today, this week and this month
+- `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`; deleted tasks and their subtasks are left out), in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
 - `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (-3 to 3, default 0)
 - `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task

@@ -708,17 +708,28 @@ fn time_box_counts_all_tabs() {
     add(30);
     press(&mut app, ":tabnew Home<enter>nChores<enter>s");
     add(45);
-    press(&mut app, "dd"); // time on a deleted task still counts
     press(&mut app, "nDishes<enter>s");
     add(10);
+    press(&mut app, "aRinse<enter>s"); // a subtask of Dishes
+    add(5);
     press(&mut app, "gTT"); // back to the first tab
     let s = screen(&mut app, 90, 12);
     let boxed = &s[s.find("time ·").unwrap()..];
-    assert!(boxed.contains("total 1h 25m"), "{s}");
-    for line in ["Chores (deleted) [Home]", "Here ", "Dishes [Home]"] {
+    assert!(boxed.contains("total 1h 30m"), "{s}");
+    for line in ["Chores [Home]", "Here ", "Dishes [Home]", "Rinse [Home]"] {
         assert!(boxed.contains(line), "{line}\n{s}");
     }
     assert!(boxed.find("Chores").unwrap() < boxed.find("Here").unwrap(), "{s}");
+
+    // deleted tasks (and their subtasks) do not count, in any tab
+    press(&mut app, "dd"); // Here
+    press(&mut app, "gtggdd"); // Chores
+    press(&mut app, "ggdd"); // Dishes, with Rinse
+    press(&mut app, "gT");
+    let s = screen(&mut app, 90, 12);
+    let boxed = &s[s.find("time ·").unwrap()..s.find(" NORMAL").unwrap()];
+    assert!(boxed.contains("total 0s"), "{s}");
+    assert!(!boxed.contains("Dishes") && !boxed.contains("Rinse"), "{s}");
 }
 
 #[test]
