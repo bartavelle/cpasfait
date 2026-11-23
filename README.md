@@ -47,6 +47,17 @@ Press `?` in the TUI for all keys. The essentials:
 - `>>`/`<<` indent or outdent, `+`/`-` priority
 - `s` start or stop working on the task (starting one stops the other)
 - Forgot to stop or switch? `S` stops what is running and `W` switches to the selected task, at a time you give: they open the command line prefilled with the current time (`:stop 14:32`, `:switch 14:32`), Enter to accept or edit it first. Times: `14:30` (a time not reached yet today is yesterday's), `-20m`, `-1h30`, `yesterday 18:00`, `2026-11-22 18:00`. With nothing running, `W` starts the task back-dated (not before your last session ended)
+- `E` (or `:edit`) opens the task's title and work log in `$VISUAL`/`$EDITOR`, like `task edit`:
+
+  ```
+  title: Write the report
+
+  work log:
+  2026-11-20 09:00:00 - 2026-11-20 10:30:00
+  2026-11-23 14:00:00 -                      # running
+  ```
+
+  Correct a line to fix a session, delete it to delete the session, add one to log time (seconds are optional; a running session has no end). Times are local, `#` starts a comment, and other members' sessions are labelled with their name. On save, all the changes are applied, or none: on an error (shown in the status line) pressing `E` again reopens your text with the error on top. An empty file, or an editor exiting with an error (vim's `:cq`), cancels
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
 - `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`), in a box at the lower right, cycling through hidden, today, this week and this month

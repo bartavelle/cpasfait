@@ -11,6 +11,7 @@ use cpasfait_core::dates::{parse_date, today_local};
 use cpasfait_core::report::fmt_duration;
 use cpasfait_core::score::{PRIORITY_MAX, PRIORITY_MIN};
 use cpasfait_core::sync::{invited_to, remote_tabs, sync_tab};
+use cpasfait_core::taskfile;
 use cpasfait_core::{Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
@@ -49,6 +50,8 @@ pub struct Message {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     EditNotes(TaskId),
+    /// Title and work log in the editor (see [`App::task_file`]).
+    EditTask(TaskId),
     Sync,
 }
 
@@ -86,6 +89,9 @@ pub struct App {
     /// Remote moves already announced in the message line.
     notified_moves: HashSet<String>,
     pub requests: Vec<Request>,
+    /// A task file whose changes could not be applied, offered again on the
+    /// next edit of that task.
+    failed_edit: Option<(TaskId, String)>,
     pub quit: bool,
     deleted_stack: Vec<TaskId>,
     data_version: i64,
@@ -123,6 +129,7 @@ impl App {
             identity: None,
             notified_moves: HashSet::new(),
             requests: vec![],
+            failed_edit: None,
             quit: false,
             deleted_stack: vec![],
             data_version: 0,
@@ -601,6 +608,11 @@ impl App {
                     self.requests.push(Request::EditNotes(id));
                 }
             }
+            EditTask => {
+                if let Some(id) = sel {
+                    self.requests.push(Request::EditTask(id));
+                }
+            }
             ToggleDone => {
                 if let Some(id) = sel {
                     self.repo.toggle_done(id)?;
@@ -792,6 +804,53 @@ impl App {
             .unwrap_or_else(|| "(unknown task)".into())
     }
 
+    /// The text to edit for `task`: its title and work log, or the last
+    /// edit of it that failed.
+    pub fn task_file(&mut self, task: TaskId) -> Result<String> {
+        match self.failed_edit.take() {
+            Some((t, text)) if t == task => Ok(text),
+            _ => Ok(taskfile::render(&self.repo, task, &self.tz)?),
+        }
+    }
+
+    /// Apply an edited task file (an error: the editor failed, drop it). On
+    /// error, the text is kept for the next edit, with the error on top.
+    pub fn finish_task_edit(&mut self, task: TaskId, text: std::result::Result<String, String>) {
+        let text = match text {
+            Ok(t) => t,
+            Err(e) => {
+                self.failed_edit = None;
+                return self.error(format!("{e}: nothing changed"));
+            }
+        };
+        let res = taskfile::parse(&text, &self.tz).and_then(|f| match f {
+            Some(f) => taskfile::apply(&mut self.repo, task, &f).map(Some),
+            None => Ok(None),
+        });
+        match res {
+            Ok(None) => self.info("empty file: nothing changed"),
+            Ok(Some(done)) => {
+                if let Err(e) = self.refresh() {
+                    return self.error(format!("{e:#}"));
+                }
+                self.info(done.to_string());
+            }
+            Err(e) => {
+                let e = match e {
+                    cpasfait_core::Error::Invalid(m) => m,
+                    e => e.to_string(),
+                };
+                let body: String = text
+                    .lines()
+                    .filter(|l| !l.starts_with("# error: "))
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                self.failed_edit = Some((task, format!("# error: {e}\n{body}")));
+                self.error(format!("{e}: nothing changed, E to fix it"));
+            }
+        }
+    }
+
     pub fn run_command(&mut self, line: &str) -> Result<()> {
         let line = line.trim();
         let (cmd, arg) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
@@ -846,6 +905,10 @@ impl App {
                     .with_context(|| format!("usage: :prio N ({PRIORITY_MIN} to {PRIORITY_MAX})"))?;
                 self.repo.set_priority(t, p)?;
                 self.refresh()?;
+            }
+            "edit" => {
+                let t = need_task(self)?;
+                self.requests.push(Request::EditTask(t));
             }
             "title" => {
                 let t = need_task(self)?;

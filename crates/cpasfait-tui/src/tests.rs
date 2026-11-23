@@ -740,3 +740,40 @@ fn priority_range_and_display() {
     // low priority: listed after the default ones
     assert!(s.find("normal").unwrap() < s.find("↓↓ later").unwrap(), "{s}");
 }
+
+#[test]
+fn edit_task_in_editor() {
+    use crate::app::Request;
+    let (mut app, time) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
+    // 2023-11-14 22:13:20 UTC
+    press(&mut app, "nAlpha<enter>s");
+    time.fetch_add(3_600_000, Ordering::SeqCst);
+    press(&mut app, "s");
+    let task = app.rows[0].id;
+    press(&mut app, "E");
+    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task)]);
+    press(&mut app, ":edit<enter>");
+    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task)]);
+
+    let text = app.task_file(task).unwrap();
+    assert!(text.contains("\n2023-11-14 22:13:20 - 2023-11-14 23:13:20\n"), "{text}");
+    let edited = text.replace("title: Alpha", "title: Alpha 2") + "2023-11-14 20:00 - 2023-11-14 2l:00\n";
+    app.finish_task_edit(task, Ok(edited));
+    assert!(message(&app).starts_with("line 10: expected"), "{}", message(&app));
+    assert_eq!(app.repo.task(task).unwrap().title, "Alpha");
+    // the next edit shows the failed text, with the error
+    let again = app.task_file(task).unwrap();
+    assert!(again.starts_with("# error: line 10: expected"), "{again}");
+    let fixed = again.replace("2l:00", "21:00");
+    app.finish_task_edit(task, Ok(fixed));
+    assert_eq!(message(&app), "title changed, 1 session added");
+    assert_eq!(app.repo.task(task).unwrap().title, "Alpha 2");
+    assert_eq!(app.repo.sessions_for_task(task).unwrap().len(), 2);
+    // back to the task's own text
+    assert!(!app.task_file(task).unwrap().contains("# error"));
+    app.finish_task_edit(task, Ok(String::new()));
+    assert_eq!(message(&app), "empty file: nothing changed");
+    app.finish_task_edit(task, Err("editor exited with 1".into()));
+    assert_eq!(message(&app), "editor exited with 1: nothing changed");
+}

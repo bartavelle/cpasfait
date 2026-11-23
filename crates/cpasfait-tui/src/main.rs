@@ -24,7 +24,7 @@ your email, recorded as the author of your tasks).
 
 Environment: CPASFAIT_CONFIG (configuration file), CPASFAIT_DATA_DIR (database
 directory; its config.toml is used instead of the default one), CPASFAIT_USER
-(display name for new databases), EDITOR (notes editor).";
+(display name for new databases), EDITOR (editor for notes and E).";
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -107,6 +107,13 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
                         app.error(format!("{e:#}"));
                     }
                 }
+                Request::EditTask(task) => match app.task_file(task) {
+                    Ok(text) => {
+                        let edited = run_editor(terminal, &text, "txt").map_err(|e| format!("{e:#}"));
+                        app.finish_task_edit(task, edited);
+                    }
+                    Err(e) => app.error(format!("{e:#}")),
+                },
             }
         }
         if let (Some(w), Some(t)) = (worker, last_edit_sync)
@@ -143,8 +150,20 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
 
 fn edit_notes(terminal: &mut DefaultTerminal, app: &mut App, task: cpasfait_core::TaskId) -> Result<()> {
     let t = app.repo.task(task)?;
-    let path = std::env::temp_dir().join(format!("cpasfait-notes-{}.md", uuid_like()));
-    std::fs::write(&path, &t.notes)?;
+    let notes = run_editor(terminal, &t.notes, "md")?.trim_end().to_owned();
+    if notes != t.notes {
+        app.repo.set_notes(task, &notes)?;
+        app.refresh()?;
+        app.info("notes saved");
+    }
+    Ok(())
+}
+
+/// Edit `text` in $VISUAL / $EDITOR (default vi), in a temporary file with
+/// extension `ext`. Errors when the editor fails (e.g. vim's `:cq`).
+fn run_editor(terminal: &mut DefaultTerminal, text: &str, ext: &str) -> Result<String> {
+    let path = std::env::temp_dir().join(format!("cpasfait-{}.{ext}", uuid_like()));
+    std::fs::write(&path, text)?;
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
         .unwrap_or_else(|_| "vi".into());
@@ -157,19 +176,14 @@ fn edit_notes(terminal: &mut DefaultTerminal, app: &mut App, task: cpasfait_core
         .status();
     *terminal = ratatui::init();
     terminal.clear()?;
-    let status = status.context("running editor")?;
-    let notes = std::fs::read_to_string(&path);
+    let status = status.context("running editor");
+    let edited = std::fs::read_to_string(&path);
     let _ = std::fs::remove_file(&path);
+    let status = status?;
     if !status.success() {
         bail!("editor exited with {status}");
     }
-    let notes = notes?.trim_end().to_owned();
-    if notes != t.notes {
-        app.repo.set_notes(task, &notes)?;
-        app.refresh()?;
-        app.info("notes saved");
-    }
-    Ok(())
+    Ok(edited?)
 }
 
 fn uuid_like() -> String {

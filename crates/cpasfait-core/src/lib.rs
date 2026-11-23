@@ -20,6 +20,7 @@ pub mod report;
 mod schema;
 pub mod score;
 pub mod sync;
+pub mod taskfile;
 pub mod tree;
 
 pub use error::{Error, Result};
