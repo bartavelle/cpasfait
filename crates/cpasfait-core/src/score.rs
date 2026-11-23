@@ -37,6 +37,12 @@ pub fn due_bonus(due: Date, today: Date) -> i64 {
 }
 
 /// The task's own score (without what it blocks).
+/// Priorities set locally range from `PRIORITY_MIN` (lowest) to
+/// `PRIORITY_MAX`; 0 is the default. (Synced values outside the range are
+/// kept as they are.)
+pub const PRIORITY_MIN: i64 = -3;
+pub const PRIORITY_MAX: i64 = 3;
+
 pub fn own_score(priority: i64, due: Option<Date>, today: Date) -> Score {
     Score {
         priority: priority * PRIORITY_WEIGHT,

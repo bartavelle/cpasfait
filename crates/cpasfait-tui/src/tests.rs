@@ -720,3 +720,23 @@ fn time_box_counts_all_tabs() {
     }
     assert!(boxed.find("Chores").unwrap() < boxed.find("Here").unwrap(), "{s}");
 }
+
+#[test]
+fn priority_range_and_display() {
+    let (mut app, _) = app();
+    press(&mut app, "nnormal<enter>nlater<enter>");
+    let later = app.selected().unwrap();
+    press(&mut app, "----"); // stops at -3
+    assert_eq!(app.repo.task(later).unwrap().priority, -3);
+    let s = screen(&mut app, 60, 6);
+    assert!(s.contains("↓↓↓ later"), "{s}");
+    press(&mut app, "+++++++"); // stops at 3
+    assert_eq!(app.repo.task(later).unwrap().priority, 3);
+    press(&mut app, ":prio -2<enter>");
+    assert_eq!(app.repo.task(later).unwrap().priority, -2);
+    press(&mut app, ":prio 7<enter>");
+    assert!(message(&app).contains("expected -3 to 3"), "{}", message(&app));
+    let s = screen(&mut app, 60, 6);
+    // low priority: listed after the default ones
+    assert!(s.find("normal").unwrap() < s.find("↓↓ later").unwrap(), "{s}");
+}

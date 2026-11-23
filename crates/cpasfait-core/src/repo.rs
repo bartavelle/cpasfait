@@ -725,7 +725,9 @@ impl Repo {
         Ok(s)
     }
 
+    /// `priority`: from [`crate::score::PRIORITY_MIN`] to [`crate::score::PRIORITY_MAX`].
     pub fn set_priority(&mut self, task: TaskId, priority: i64) -> Result<()> {
+        check_priority(priority)?;
         self.set_task(task, Change::TaskPriority(priority))
     }
 
@@ -1371,6 +1373,17 @@ fn read_clock(conn: &Connection) -> Result<ClockState> {
             counter: r.get(1)?,
         })
     })?)
+}
+
+pub(crate) fn check_priority(p: i64) -> Result<()> {
+    use crate::score::{PRIORITY_MAX, PRIORITY_MIN};
+    if (PRIORITY_MIN..=PRIORITY_MAX).contains(&p) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "priority {p}: expected {PRIORITY_MIN} to {PRIORITY_MAX}"
+        )))
+    }
 }
 
 fn default_user() -> String {

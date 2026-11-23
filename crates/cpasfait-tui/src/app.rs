@@ -9,6 +9,7 @@ use cpasfait_core::backend;
 use cpasfait_core::crypto::Identity;
 use cpasfait_core::dates::{parse_date, today_local};
 use cpasfait_core::report::fmt_duration;
+use cpasfait_core::score::{PRIORITY_MAX, PRIORITY_MIN};
 use cpasfait_core::sync::{invited_to, remote_tabs, sync_tab};
 use cpasfait_core::{Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -649,11 +650,7 @@ impl App {
             PriorityUp | PriorityDown => {
                 if let Some(id) = sel {
                     let p = self.repo.task(id)?.priority;
-                    let np = if action == PriorityUp {
-                        (p + 1).min(9)
-                    } else {
-                        (p - 1).max(0)
-                    };
+                    let np = if action == PriorityUp { p + 1 } else { p - 1 }.clamp(PRIORITY_MIN, PRIORITY_MAX);
                     if np != p {
                         self.repo.set_priority(id, np)?;
                         self.refresh()?;
@@ -844,8 +841,10 @@ impl App {
             }
             "prio" | "priority" => {
                 let t = need_task(self)?;
-                let p: i64 = arg.parse().context("usage: :prio N")?;
-                self.repo.set_priority(t, p.clamp(0, 9))?;
+                let p: i64 = arg
+                    .parse()
+                    .with_context(|| format!("usage: :prio N ({PRIORITY_MIN} to {PRIORITY_MAX})"))?;
+                self.repo.set_priority(t, p)?;
                 self.refresh()?;
             }
             "title" => {

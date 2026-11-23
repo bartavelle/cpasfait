@@ -321,10 +321,13 @@ impl TabSettings {
         Self::describe(name)?;
         let text = text.trim();
         match name {
-            "default_priority" => text
-                .parse::<i64>()
-                .map(serde_json::Value::from)
-                .map_err(|_| crate::Error::Invalid(format!("{name}: expected an integer, got {text:?}"))),
+            "default_priority" => {
+                let p = text
+                    .parse::<i64>()
+                    .map_err(|_| crate::Error::Invalid(format!("{name}: expected an integer, got {text:?}")))?;
+                crate::repo::check_priority(p)?;
+                Ok(serde_json::Value::from(p))
+            }
             _ => unreachable!("described above"),
         }
     }

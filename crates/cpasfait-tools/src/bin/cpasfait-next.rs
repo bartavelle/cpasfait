@@ -90,7 +90,9 @@ fn run() -> Result<bool> {
     }
     let mut line = if args.path { path.join(" › ") } else { t.title.clone() };
     if args.long {
-        if t.priority > 0 {
+        if t.priority < 0 {
+            line.push_str(&format!(" ↓{}", -t.priority));
+        } else if t.priority > 0 {
             line.push_str(&format!(" !{}", t.priority));
         }
         line.push_str(&format!(" score:{score}"));

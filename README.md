@@ -51,7 +51,7 @@ Press `?` in the TUI for all keys. The essentials:
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
 - `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`), in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
-- `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (default 0)
+- `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (-3 to 3, default 0)
 - `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task
 
 ### Sharing a tab
@@ -179,7 +179,9 @@ Notes:
 
 Each open task has a score, shown in the details pane:
 
-- `priority × 100`, so priority matters most;
+- `priority × 100`, so priority matters most. Priorities go from -3 to 3
+  (`+`/`-`, `:prio N`), 0 by default: shown as `!`…`!!!` above 0, and as a
+  dimmed `↓`…`↓↓↓` below (for things that can wait);
 - a due date adds `10 + 80 / (1 + days left / 7)`: 90 when due today or
   overdue, 50 a week ahead, about 25 a month ahead. At equal priority a task
   with a deadline beats one without, and gets more urgent as it approaches,

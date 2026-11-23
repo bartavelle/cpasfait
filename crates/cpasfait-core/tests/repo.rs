@@ -188,7 +188,7 @@ fn dependencies() {
     let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
     let child = r.add_task(tab, Place::LastChildOf(Some(a)), "child").unwrap();
     let elsewhere = r.add_task(other, Place::LastChildOf(None), "x").unwrap();
-    r.set_priority(a, 5).unwrap();
+    r.set_priority(a, 3).unwrap();
 
     r.set_blocked_by(a, b, true).unwrap();
     assert_eq!(r.task(a).unwrap().blocked_by, vec![b]);
@@ -252,14 +252,14 @@ fn dependencies_across_tabs() {
     let report = r1.add_task(work, Place::LastChildOf(None), "report").unwrap();
     let other = r1.add_task(work, Place::LastChildOf(None), "other").unwrap();
     let car = r1.add_task(home, Place::LastChildOf(None), "fix car").unwrap();
-    r1.set_priority(report, 5).unwrap();
+    r1.set_priority(report, 3).unwrap();
     r1.set_blocked_by(report, car, true).unwrap();
 
     assert!(r1.tree(work).unwrap().is_blocked(report));
     // "fix car" inherits the score of the task it blocks in another tab
     let s = r1.tree(home).unwrap().scores()[&car];
-    assert_eq!((s.priority, s.blocking), (0, 500));
-    assert_eq!(r1.structure(home).unwrap().scores()[&car].blocking, 500);
+    assert_eq!((s.priority, s.blocking), (0, 300));
+    assert_eq!(r1.structure(home).unwrap().scores()[&car].blocking, 300);
     assert_eq!(r1.next_task(work).unwrap().unwrap().id, other);
     let d = r1.dependencies(report).unwrap();
     assert_eq!(d.requires.len(), 1);
@@ -428,4 +428,27 @@ fn report_by_tags() {
             (None, 10 * min)
         ]
     );
+}
+
+#[test]
+fn low_priorities() {
+    let mut r = Repo::open_in_memory().unwrap();
+    let tab = r.create_tab("t").unwrap();
+    let low = r.add_task(tab, Place::LastChildOf(None), "low").unwrap();
+    let normal = r.add_task(tab, Place::LastChildOf(None), "normal").unwrap();
+    let lowest = r.add_task(tab, Place::LastChildOf(None), "lowest").unwrap();
+    r.set_priority(low, -1).unwrap();
+    r.set_priority(lowest, -3).unwrap();
+    assert!(r.set_priority(low, -4).is_err());
+    assert!(r.set_priority(low, 4).is_err());
+    assert_eq!(r.tree(tab).unwrap().children(None), &[normal, low, lowest]);
+    // the next task is still the highest score, even when all are low
+    assert_eq!(r.next_task(tab).unwrap().unwrap().id, normal);
+    r.toggle_done(normal).unwrap();
+    assert_eq!(r.next_task(tab).unwrap().unwrap().id, low);
+    // the tab setting has the same range
+    assert!(r.set_tab_setting(tab, "default_priority", Some("-4")).is_err());
+    r.set_tab_setting(tab, "default_priority", Some("-2")).unwrap();
+    let t = r.add_task(tab, Place::LastChildOf(None), "x").unwrap();
+    assert_eq!(r.task(t).unwrap().priority, -2);
 }

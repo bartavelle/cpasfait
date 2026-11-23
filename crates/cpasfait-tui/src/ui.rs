@@ -128,6 +128,8 @@ fn task_prefix(app: &App, t: &Task, depth: usize, has_children: bool) -> Vec<Spa
             format!("{} ", "!".repeat(t.priority.min(3) as usize)),
             Style::new().fg(color).bold(),
         ));
+    } else if t.priority < 0 {
+        v.push(Span::raw(format!("{} ", "↓".repeat((-t.priority).min(3) as usize))).dim());
     }
     v
 }
@@ -164,6 +166,8 @@ fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> u
                     let mut st = Style::new();
                     if t.is_done() {
                         st = st.dim().crossed_out();
+                    } else if t.priority < 0 {
+                        st = st.dim();
                     }
                     if app.next == Some(t.id) {
                         st = st.bold();
