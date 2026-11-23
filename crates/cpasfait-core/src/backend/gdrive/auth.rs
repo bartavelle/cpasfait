@@ -46,6 +46,12 @@ impl Client {
         }
         serde_json::from_slice(data).map_err(|e| Error::Invalid(format!("not an OAuth client JSON file: {e}")))
     }
+
+    /// The client built into this binary, if any (see `build.rs`).
+    pub fn embedded() -> Option<Self> {
+        const JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/gdrive_client.json"));
+        (!JSON.is_empty()).then(|| Self::from_json(JSON.as_bytes()).ok()).flatten()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

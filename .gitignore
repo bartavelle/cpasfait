@@ -1,1 +1,3 @@
 /target
+# OAuth client embedded at build time (see crates/cpasfait-core/build.rs)
+/gdrive-client.json

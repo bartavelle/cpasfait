@@ -11,7 +11,8 @@ use std::path::PathBuf;
 ///
 /// Setup: in the Google Cloud console, enable the Drive API, create an OAuth
 /// client of type "Desktop app" and download its JSON, then run
-/// `cpasfait-gdrive login --client client_secret.json`. In the TUI, attach a
+/// `cpasfait-gdrive login --client client_secret.json` (just `login` if this
+/// build has a client built in, see `status`). In the TUI, attach a
 /// tab with `:tabremote gdrive:FOLDER-ID` and join it elsewhere with
 /// `:tabjoin gdrive:FOLDER-ID`.
 #[derive(Parser)]
@@ -33,7 +34,8 @@ enum Scope {
 enum Cmd {
     /// Authorize cpasfait (opens a browser).
     Login {
-        /// OAuth client JSON downloaded from the Cloud console (default: reuse the stored client).
+        /// OAuth client JSON downloaded from the Cloud console (default: the
+        /// stored client, else the one built into this binary, if any).
         #[arg(long)]
         client: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "full")]
@@ -106,9 +108,11 @@ fn main() -> Result<()> {
                 Some(f) => {
                     auth::Client::from_json(&std::fs::read(&f).with_context(|| format!("reading {}", f.display()))?)?
                 }
-                None => auth::Credentials::read(&path)
-                    .map(|c| c.client)
-                    .context("no stored OAuth client: pass --client client_secret.json")?,
+                None => match auth::Credentials::read(&path) {
+                    Ok(c) => c.client,
+                    Err(_) => auth::Client::embedded()
+                        .context("no OAuth client in this build: pass --client client_secret.json")?,
+                },
             };
             let scope = match scope {
                 Scope::Full => auth::SCOPE_FULL,
@@ -135,6 +139,10 @@ fn main() -> Result<()> {
             Err(_) => println!("Not logged in."),
         },
         Cmd::Status => {
+            match auth::Client::embedded() {
+                Some(c) => println!("Built-in client: {}", c.client_id),
+                None => println!("Built-in client: none"),
+            }
             let c = auth::Credentials::read(&path)?;
             let user = gdrive::open("root")?.api().about()?;
             println!("Account: {} <{}>", user.display_name, user.email_address);

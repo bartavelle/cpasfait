@@ -151,6 +151,14 @@ set things up):
    OAuth client of type **Desktop app**. Download its JSON.
 2. `cpasfait-gdrive login --client client_secret.json` opens a browser and
    stores the credentials in `<data dir>/gdrive.json`.
+
+   To spare the other users this step, build the client into the binaries:
+   put the JSON at `gdrive-client.json` in the workspace root (ignored by
+   git), or point `CPASFAIT_GDRIVE_CLIENT` to it, then build. Users of that
+   build just run `cpasfait-gdrive login` (they must still be test users of
+   your consent screen). `cpasfait-gdrive status` shows the built-in client.
+   A desktop OAuth client is not really secret (Google expects it to ship
+   inside apps), but avoid publishing it.
 3. `cpasfait-gdrive mkdir cpasfait` creates a folder and prints `gdrive:ID`;
    `cpasfait-gdrive share gdrive:ID friend@example.com` gives someone write access.
 4. In the TUI: `:tabremote gdrive:ID` and `:tabinvite KEY` for each other
