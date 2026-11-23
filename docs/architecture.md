@@ -87,7 +87,7 @@ Both read the local DB only (no network by default; `--sync` opt-in), output pla
   (target: a few ms, fit for status bars / shell prompts). Default rule: candidates are not done, not deleted, with no
   done/deleted ancestor, and *leaves* (no open subtasks — the actionable item); order by priority desc, due asc (nulls last),
   then tree order. Rule implemented once in core (`Repo::next_task`) so the TUI can show/jump to it too (`gn`).
-- **`cpasfait-report --from DATE --to DATE [--tab ..] [--user ..] [--group task|tab|user|day]`** — time breakdown:
+- **`cpasfait-report [PERIOD | --from DATE --to DATE] [--tab ..] [--me | --user ..] [--by task,tab,tags,tag,user,day]`** — time breakdown:
   sessions clipped to the range (open sessions count until now), summed per task and **rolled up through the hierarchy**
   (parent total = own + descendants), shown as an indented tree with durations and percentages. Logic in core
   (`Repo::time_report(range, filters)`) so the TUI/mobile can reuse it.

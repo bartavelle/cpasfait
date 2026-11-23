@@ -143,6 +143,80 @@ pub fn by_task(repo: &Repo, slices: &[Slice]) -> Result<Vec<TabReport>> {
     Ok(out)
 }
 
+/// The tags of each task with time: its own and its ancestors' (tagging a
+/// project's parent task tags all its subtasks), sorted.
+fn effective_tags(repo: &Repo, slices: &[Slice]) -> Result<HashMap<Option<TaskId>, Vec<String>>> {
+    let mut trees: HashMap<TabId, Tree> = HashMap::new();
+    let mut out: HashMap<Option<TaskId>, Vec<String>> = HashMap::new();
+    for s in slices {
+        let Some(task) = s.task else {
+            out.entry(None).or_default();
+            continue;
+        };
+        if out.contains_key(&Some(task)) {
+            continue;
+        }
+        let tree = match trees.entry(s.tab) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => e.insert(repo.tree(s.tab)?),
+        };
+        let mut tags: Vec<String> = if tree.contains(task) {
+            std::iter::once(task)
+                .chain(tree.ancestors(task))
+                .filter_map(|id| tree.get(id))
+                .flat_map(|t| t.tags.iter().cloned())
+                .collect()
+        } else {
+            // deleted (or unknown): its own tags only
+            repo.task(task).map(|t| t.tags).unwrap_or_default()
+        };
+        tags.sort();
+        tags.dedup();
+        out.insert(Some(task), tags);
+    }
+    Ok(out)
+}
+
+/// Totals per combination of tags (see `effective_tags`; empty: no tags),
+/// sorted by decreasing time.
+pub fn by_tag_set(repo: &Repo, slices: &[Slice]) -> Result<Vec<(Vec<String>, i64)>> {
+    let tags = effective_tags(repo, slices)?;
+    let mut m: HashMap<&[String], i64> = HashMap::new();
+    for s in slices {
+        *m.entry(tags[&s.task].as_slice()).or_default() += s.ms();
+    }
+    Ok(sorted(m.into_iter().map(|(k, v)| (k.to_vec(), v))))
+}
+
+/// Totals per tag (`None`: tasks without tags). A task with several tags
+/// counts for each, so the totals add up to more than the time spent.
+pub fn by_tag(repo: &Repo, slices: &[Slice]) -> Result<Vec<(Option<String>, i64)>> {
+    let tags = effective_tags(repo, slices)?;
+    let mut m: HashMap<Option<&str>, i64> = HashMap::new();
+    for s in slices {
+        let t = &tags[&s.task];
+        if t.is_empty() {
+            *m.entry(None).or_default() += s.ms();
+        }
+        for tag in t {
+            *m.entry(Some(tag.as_str())).or_default() += s.ms();
+        }
+    }
+    Ok(sorted(m.into_iter().map(|(k, v)| (k.map(str::to_owned), v))))
+}
+
+/// By decreasing time, then key; the "none" key (empty, `None`) last.
+fn sorted<K: Ord + Default>(it: impl Iterator<Item = (K, i64)>) -> Vec<(K, i64)> {
+    let mut v: Vec<_> = it.collect();
+    v.sort_by(|a, b| {
+        (a.0 == K::default())
+            .cmp(&(b.0 == K::default()))
+            .then(b.1.cmp(&a.1))
+            .then(a.0.cmp(&b.0))
+    });
+    v
+}
+
 /// Totals per user, sorted by decreasing time.
 pub fn by_user(slices: &[Slice]) -> Vec<(String, i64)> {
     let mut m: HashMap<&str, i64> = HashMap::new();

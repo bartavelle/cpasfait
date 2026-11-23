@@ -392,3 +392,40 @@ fn back_dated_start_cannot_overlap_the_last_session() {
     assert!(r.start_work_at(a, t0 + 30_000).is_err());
     r.start_work_at(a, t0 + 60_000).unwrap();
 }
+
+#[test]
+fn report_by_tags() {
+    let (mut r, time) = repo_with_clock();
+    let work = r.create_tab("work").unwrap();
+    let home = r.create_tab("home").unwrap();
+    let proj = r.add_task(work, Place::LastChildOf(None), "project").unwrap();
+    r.set_tag(proj, "acme", true).unwrap();
+    let dev = r.add_task(work, Place::LastChildOf(Some(proj)), "dev").unwrap();
+    r.set_tag(dev, "dev", true).unwrap();
+    let meet = r.add_task(work, Place::LastChildOf(Some(proj)), "meeting").unwrap();
+    let chores = r.add_task(home, Place::LastChildOf(None), "chores").unwrap();
+    let min = 60_000;
+    for (task, mins) in [(dev, 30), (meet, 20), (chores, 10), (dev, 15)] {
+        r.start_work(task).unwrap();
+        time.fetch_add(mins * min, Ordering::SeqCst);
+    }
+    r.stop_work().unwrap();
+    let all = report::slices(&r, 0, i64::MAX, &Filter::default()).unwrap();
+    let s = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        report::by_tag_set(&r, &all).unwrap(),
+        vec![
+            (s(&["acme", "dev"]), 45 * min),
+            (s(&["acme"]), 20 * min),
+            (vec![], 10 * min)
+        ]
+    );
+    assert_eq!(
+        report::by_tag(&r, &all).unwrap(),
+        vec![
+            (Some("acme".into()), 65 * min),
+            (Some("dev".into()), 45 * min),
+            (None, 10 * min)
+        ]
+    );
+}

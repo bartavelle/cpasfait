@@ -196,10 +196,24 @@ not done, without open subtasks, not blocked by an unfinished requirement,
 highest score first, then earliest due date, then tree order. Exit status is 2 when there is nothing to do. It opens
 the database read-only and takes a few milliseconds, so it suits status bars.
 
-`cpasfait-report [--from D] [--to D] [--tab T] [--user U] [--by task|tab|user|day] [--json]`
-shows where the time went. Subtask time is rolled up into parents, and running
-sessions count up to now. Dates accept `2026-11-01`, `today`, `yesterday`,
-`-1w`, `mon`, and so on.
+`cpasfait-report [PERIOD | --from D --to D] [--by …] [--me | --user U] [--tab T] [--json]`
+shows where the time went, across all tabs (or one with `--tab`):
+
+```
+cpasfait-report last-week --by tab,task,tags --me
+```
+
+- `PERIOD`: `today`, `yesterday`, `this-week`, `last-week` (weeks start on
+  Monday), `this-month`, `last-month`, `this-year`, `last-year`. Without one,
+  `--from`/`--to` (default: the last 7 days); dates accept `2026-11-01`,
+  `today`, `yesterday`, `-1w`, `mon`, and so on.
+- `--by` (comma-separated, one section each): `task` (default; subtask time
+  rolled up into parents), `tab`, `tags` (per combination of tags, e.g.
+  `#acme + #dev`), `tag` (per tag; a task counts for each of its tags, so these
+  add up to more than the total), `user`, `day`. A task has its ancestors'
+  tags too: tag a project's parent task and all its subtasks count for it.
+- `--me`: only your time; shared tabs also hold the other members' sessions.
+- Running sessions count up to now.
 
 ## Development
 

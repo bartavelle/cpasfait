@@ -52,6 +52,43 @@ pub fn parse_date(s: &str, today: Date) -> Option<Date> {
     None
 }
 
+/// A named period, as an inclusive range of days: `today`, `yesterday`,
+/// `this-week` (or `week`), `last-week`, `this-month` (`month`),
+/// `last-month`, `this-year` (`year`), `last-year`. Weeks start on Monday.
+pub fn parse_period(s: &str, today: Date) -> Option<(Date, Date)> {
+    let key: String = s
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+    let monday = today
+        .checked_sub((today.weekday().to_monday_zero_offset() as i64).days())
+        .ok()?;
+    let first_of_month = today.first_of_month();
+    let first_of_year = today.first_of_year();
+    Some(match key.as_str() {
+        "today" => (today, today),
+        "yesterday" => {
+            let y = today.yesterday().ok()?;
+            (y, y)
+        }
+        "week" | "thisweek" => (monday, monday.checked_add(6.days()).ok()?),
+        "lastweek" => (monday.checked_sub(7.days()).ok()?, monday.yesterday().ok()?),
+        "month" | "thismonth" => (first_of_month, today.last_of_month()),
+        "lastmonth" => {
+            let last = first_of_month.yesterday().ok()?;
+            (last.first_of_month(), last)
+        }
+        "year" | "thisyear" => (first_of_year, today.last_of_year()),
+        "lastyear" => {
+            let last = first_of_year.yesterday().ok()?;
+            (last.first_of_year(), last)
+        }
+        _ => return None,
+    })
+}
+
 /// Parse a moment, at or before `now` (Unix ms), in `tz`. Returns Unix ms.
 ///
 /// - `now`;
@@ -123,6 +160,24 @@ mod tests {
         assert_eq!(parse_date("Monday", today), Some(date(2026, 11, 23)));
         assert_eq!(parse_date("m", today), None);
         assert_eq!(parse_date("garbage", today), None);
+    }
+
+    #[test]
+    fn periods() {
+        let today = date(2026, 11, 20); // a Friday
+        let p = |s| parse_period(s, today);
+        assert_eq!(p("this-week"), Some((date(2026, 11, 16), date(2026, 11, 22))));
+        assert_eq!(p("Last week"), Some((date(2026, 11, 9), date(2026, 11, 15))));
+        assert_eq!(p("last_month"), Some((date(2026, 10, 1), date(2026, 10, 31))));
+        assert_eq!(p("month"), Some((date(2026, 11, 1), date(2026, 11, 30))));
+        assert_eq!(p("yesterday"), Some((date(2026, 11, 19), date(2026, 11, 19))));
+        assert_eq!(p("last-year"), Some((date(2025, 1, 1), date(2025, 12, 31))));
+        // on a Monday, this week starts today
+        assert_eq!(
+            parse_period("week", date(2026, 11, 16)),
+            Some((date(2026, 11, 16), date(2026, 11, 22)))
+        );
+        assert_eq!(p("fortnight"), None);
     }
 
     #[test]
