@@ -9,7 +9,7 @@ expression: "screen(&mut app, 90, 12)"
       [x] Build  ⌛ 2099-01-01 #dev                   │
                                                      │status   todo
                                                      │priority 0
-                                                     │score    0
+                                                     │score    300
                                                      │due      -
                                                      │tags     -
                                                      │author   alice

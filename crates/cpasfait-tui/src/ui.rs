@@ -375,13 +375,13 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-/// `score    750  priority 300 + due 50 + blocking 400`
+/// `score    750  prio 300 + due 50 + blocks 400`
 fn score_line(score: Option<&Score>, label: Span<'static>) -> Line<'static> {
     let Some(s) = score else {
         return Line::from(vec![label, Span::raw("-").dim()]);
     };
     let mut parts = vec![];
-    for (name, v) in [("priority", s.priority), ("due", s.due), ("blocking", s.blocking)] {
+    for (name, v) in [("prio", s.priority), ("due", s.due), ("blocks", s.blocking)] {
         if v != 0 {
             parts.push(format!("{name} {v}"));
         }

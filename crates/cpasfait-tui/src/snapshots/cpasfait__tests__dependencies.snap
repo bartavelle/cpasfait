@@ -9,7 +9,7 @@ expression: "screen(&mut app, 100, 14)"
     [ ] Invite friends  ⊘blocked                           │
                                                            │status   todo
                                                            │priority 0
-                                                           │score    0
+                                                           │score    600  prio 300 + blocks 300
                                                            │due      -
                                                            │tags     -
                                                            │author   alice

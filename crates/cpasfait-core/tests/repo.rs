@@ -192,8 +192,8 @@ fn dependencies() {
 
     r.set_blocked_by(a, b, true).unwrap();
     assert_eq!(r.task(a).unwrap().blocked_by, vec![b]);
-    // a has an open child and is blocked by b: b inherits a's score (500)
-    // and beats the child (0)
+    // a has an open child and is blocked by b: b inherits a's score (600)
+    // and beats the child (300)
     assert_eq!(r.next_task(tab).unwrap().unwrap().id, b);
     r.toggle_done(b).unwrap();
     assert_eq!(r.next_task(tab).unwrap().unwrap().id, child);
@@ -258,8 +258,8 @@ fn dependencies_across_tabs() {
     assert!(r1.tree(work).unwrap().is_blocked(report));
     // "fix car" inherits the score of the task it blocks in another tab
     let s = r1.tree(home).unwrap().scores()[&car];
-    assert_eq!((s.priority, s.blocking), (0, 300));
-    assert_eq!(r1.structure(home).unwrap().scores()[&car].blocking, 300);
+    assert_eq!((s.priority, s.blocking), (300, 600));
+    assert_eq!(r1.structure(home).unwrap().scores()[&car].blocking, 600);
     assert_eq!(r1.next_task(work).unwrap().unwrap().id, other);
     let d = r1.dependencies(report).unwrap();
     assert_eq!(d.requires.len(), 1);

@@ -1,0 +1,19 @@
+---
+source: crates/cpasfait-tui/src/tests.rs
+assertion_line: 278
+expression: "screen(&mut app, 90, 14)"
+---
+ 1:inbox                                                                            alice
+ inbox                                               │ details
+    [ ] Alpha                                        │Beta
+▶   [ ] Beta  ⏱                                      │
+    [ ] Gamma                                        │
+    [ ] Delta                                        │status   todo
+                                                     │priority 0
+                                                     │score    300
+                                                     │due      -
+                                              ┌ time · today ────────────────────────────┐
+                                              │Beta                                2h 05m│
+                                              │Alpha                                  40m│
+                                              └──────────────────────────── total 2h 45m ┘
+ NORMAL  time spent: today                                                 ⏱ Beta 2:05:00

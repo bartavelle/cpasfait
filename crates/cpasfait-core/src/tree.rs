@@ -649,8 +649,8 @@ mod tests {
         ]);
         assert_eq!(t.next_task(), Some(ids[2]));
         let s = t.scores();
-        assert_eq!(s[&ids[0]].total(), 100);
-        assert!(s[&ids[1]].total() > 100 && s[&ids[1]].total() < s[&ids[2]].total());
+        assert_eq!(s[&ids[0]].total(), 400);
+        assert!(s[&ids[1]].total() > 400 && s[&ids[1]].total() < s[&ids[2]].total());
         // but priority dominates
         let t = build(vec![mk(0, 2, None), mk(2, 1, Some(date(2026, 11, 1)))]);
         assert_eq!(t.next_task(), Some(ids[0]));
@@ -661,19 +661,27 @@ mod tests {
         b.blocked_by = vec![ids[0]];
         let mut c = mk(2, 5, None);
         c.blocked_by = vec![ids[1]];
-        let d = mk(3, 6, None); // unrelated, higher than anything on its own
+        let d = mk(3, 7, None); // unrelated, higher than anything on its own
         let t = build(vec![a.clone(), b.clone(), c.clone(), d.clone()]);
         let s = t.scores();
-        assert_eq!(s[&ids[2]].total(), 500);
-        assert_eq!(s[&ids[1]].total(), 300 + 500);
-        assert_eq!((s[&ids[0]].blocking, s[&ids[0]].total()), (800, 800));
-        assert_eq!(t.next_task(), Some(ids[0]), "unblocks 800 worth of work");
+        assert_eq!(s[&ids[2]].total(), 800);
+        assert_eq!(s[&ids[1]].total(), 600 + 800);
+        assert_eq!((s[&ids[0]].blocking, s[&ids[0]].total()), (1400, 1700));
+        assert_eq!(t.next_task(), Some(ids[0]), "unblocks 1400 worth of work");
         // a done blocked task no longer counts
         let mut c_done = c.clone();
         c_done.status = Status::Done;
         let t = build(vec![a.clone(), b.clone(), c_done, d.clone()]);
-        assert_eq!(t.scores()[&ids[0]].total(), 300);
+        assert_eq!(t.scores()[&ids[0]].total(), 900);
         assert_eq!(t.next_task(), Some(ids[3]));
+        // a low-priority task raises its blocker instead of lowering it
+        let mut low = mk(1, -2, None);
+        low.blocked_by = vec![ids[0]];
+        let blocker = mk(0, -1, None);
+        let t = build(vec![blocker, low]);
+        let s = t.scores();
+        assert_eq!((s[&ids[1]].total(), s[&ids[0]].total()), (100, 200 + 100));
+        assert_eq!(t.next_task(), Some(ids[0]));
         // cycles (concurrent edits) terminate
         let mut a2 = a;
         a2.blocked_by = vec![ids[2]];

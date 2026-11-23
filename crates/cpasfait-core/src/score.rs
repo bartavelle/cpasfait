@@ -1,6 +1,9 @@
 //! Task scores: how urgent a task is, used to pick the next task.
 //!
-//! - `priority × 100`: priority dominates;
+//! - `(priority + 3) × 100`: priority dominates. Shifted so that scores are
+//!   never negative (priorities go down to -3): a low-priority task that
+//!   requires another then raises its blocker, instead of pulling it below
+//!   itself;
 //! - a due date adds `10 + 80 / (1 + days_left / 7)` (90 when due today or
 //!   overdue, ~50 one week ahead, ~25 a month ahead, always ≥ 10): at equal
 //!   priority a task with a deadline beats one without, and it rises as the
@@ -45,7 +48,7 @@ pub const PRIORITY_MAX: i64 = 3;
 
 pub fn own_score(priority: i64, due: Option<Date>, today: Date) -> Score {
     Score {
-        priority: priority * PRIORITY_WEIGHT,
+        priority: (priority.max(PRIORITY_MIN) - PRIORITY_MIN) * PRIORITY_WEIGHT,
         due: due.map(|d| due_bonus(d, today)).unwrap_or(0),
         blocking: 0,
     }
@@ -69,6 +72,10 @@ mod tests {
         // never a full priority step
         assert!(b(date(2026, 11, 20)) < PRIORITY_WEIGHT);
         let s = own_score(2, Some(date(2026, 11, 27)), today);
-        assert_eq!((s.priority, s.due, s.total()), (200, 50, 250));
+        assert_eq!((s.priority, s.due, s.total()), (500, 50, 550));
+        // never negative
+        assert_eq!(own_score(PRIORITY_MIN, None, today).total(), 0);
+        assert_eq!(own_score(-7, None, today).total(), 0);
+        assert_eq!(own_score(0, None, today).total(), 300);
     }
 }

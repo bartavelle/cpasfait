@@ -191,9 +191,11 @@ Notes:
 
 Each open task has a score, shown in the details pane:
 
-- `priority × 100`, so priority matters most. Priorities go from -3 to 3
-  (`+`/`-`, `:prio N`), 0 by default: shown as `!`…`!!!` above 0, and as a
-  dimmed `↓`…`↓↓↓` below (for things that can wait);
+- `(priority + 3) × 100`, so priority matters most. Priorities go from -3
+  to 3 (`+`/`-`, `:prio N`), 0 by default (300 points): shown as `!`…`!!!`
+  above 0, and as a dimmed `↓`…`↓↓↓` below (for things that can wait).
+  Scores are never negative, so a task always scores at least as much as
+  any task it blocks (see below);
 - a due date adds `10 + 80 / (1 + days left / 7)`: 90 when due today or
   overdue, 50 a week ahead, about 25 a month ahead. At equal priority a task
   with a deadline beats one without, and gets more urgent as it approaches,
