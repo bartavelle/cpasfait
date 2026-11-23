@@ -27,6 +27,7 @@ enum By {
 /// Where time was spent, in all tabs, during a period (local time zone).
 ///
 /// Examples: `cpasfait-report last-week --by tab,tags --me`,
+/// `cpasfait-report week 23`,
 /// `cpasfait-report --from 2026-11-01 --to today`.
 ///
 /// Dates accept YYYY-MM-DD, today, yesterday, +Nd/-Nd/-Nw/-Nm, or weekday names.
@@ -34,9 +35,10 @@ enum By {
 #[command(version)]
 struct Args {
     /// today, yesterday, this-week (Monday to Sunday), last-week, this-month,
-    /// last-month, this-year, last-year. Default: the last 7 days.
-    #[arg(conflicts_with_all = ["from", "to"])]
-    period: Option<String>,
+    /// last-month, this-year, last-year, or an ISO week: `week 23` (this
+    /// year), `week 23 2025`, `2025-W23`. Default: the last 7 days.
+    #[arg(conflicts_with_all = ["from", "to"], num_args = 0..)]
+    period: Vec<String>,
     /// First day (default: 6 days ago).
     #[arg(short, long, allow_hyphen_values = true)]
     from: Option<String>,
@@ -103,11 +105,9 @@ fn run(out: &mut String) -> Result<()> {
     let args = Args::parse();
     let today = today_local();
     let parse = |s: &str| parse_date(s, today).with_context(|| format!("can't parse date {s:?}"));
-    let (from, to) = match &args.period {
-        Some(p) => parse_period(p, today).with_context(|| {
-            format!("unknown period {p:?} (today, yesterday, this-week, last-week, this-month, last-month, this-year, last-year)")
-        })?,
-        None => (
+    let period = args.period.join(" ");
+    let (from, to) = match period.as_str() {
+        "" => (
             match &args.from {
                 Some(s) => parse(s)?,
                 None => today.checked_sub(6.days())?,
@@ -117,6 +117,12 @@ fn run(out: &mut String) -> Result<()> {
                 None => today,
             },
         ),
+        p => parse_period(p, today).with_context(|| {
+            format!(
+                "unknown period {p:?} (today, yesterday, this-week, last-week, this-month, last-month, \
+                 this-year, last-year, week 23, week 23 2025)"
+            )
+        })?,
     };
     if to < from {
         bail!("--to ({to}) is before --from ({from})");

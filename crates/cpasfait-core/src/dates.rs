@@ -54,8 +54,13 @@ pub fn parse_date(s: &str, today: Date) -> Option<Date> {
 
 /// A named period, as an inclusive range of days: `today`, `yesterday`,
 /// `this-week` (or `week`), `last-week`, `this-month` (`month`),
-/// `last-month`, `this-year` (`year`), `last-year`. Weeks start on Monday.
+/// `last-month`, `this-year` (`year`), `last-year`, or an ISO week: `week 23`
+/// (`week23`, `w23`; this year), `week 23 2025`, `2025-W23`. Weeks start on
+/// Monday; week 1 is the one with the year's first Thursday.
 pub fn parse_period(s: &str, today: Date) -> Option<(Date, Date)> {
+    if let Some(week) = parse_iso_week(s, today) {
+        return Some(week);
+    }
     let key: String = s
         .trim()
         .to_lowercase()
@@ -87,6 +92,27 @@ pub fn parse_period(s: &str, today: Date) -> Option<(Date, Date)> {
         }
         _ => return None,
     })
+}
+
+/// `week 23`, `week23`, `w23`, `week 23 2025`, `2025-w23`.
+fn parse_iso_week(s: &str, today: Date) -> Option<(Date, Date)> {
+    let s = s.trim().to_lowercase();
+    let (week, year) = if let Some((year, week)) = s.split_once("-w") {
+        (week, Some(year))
+    } else {
+        let rest = s.strip_prefix("week").or_else(|| s.strip_prefix('w'))?.trim_start();
+        match rest.split_once(char::is_whitespace) {
+            Some((week, year)) => (week, Some(year.trim())),
+            None => (rest, None),
+        }
+    };
+    let week: i8 = week.trim().parse().ok()?;
+    let year: i16 = match year {
+        Some(y) => y.parse().ok()?,
+        None => today.iso_week_date().year(),
+    };
+    let monday = jiff::civil::ISOWeekDate::new(year, week, Weekday::Monday).ok()?.date();
+    Some((monday, monday.checked_add(6.days()).ok()?))
 }
 
 /// Parse a moment, at or before `now` (Unix ms), in `tz`. Returns Unix ms.
@@ -178,6 +204,16 @@ mod tests {
             Some((date(2026, 11, 16), date(2026, 11, 22)))
         );
         assert_eq!(p("fortnight"), None);
+        // ISO weeks
+        let w23 = Some((date(2026, 6, 1), date(2026, 6, 7)));
+        for s in ["week 23", "Week23", "w23", "week 23 2026", "2026-W23", "2026-w23"] {
+            assert_eq!(p(s), w23, "{s}");
+        }
+        assert_eq!(p("week 1 2027"), Some((date(2027, 1, 4), date(2027, 1, 10))));
+        assert_eq!(p("week 53"), Some((date(2026, 12, 28), date(2027, 1, 3)))); // 2026 has 53
+        for bad in ["week 54", "week 0", "w", "week x", "week 3 x"] {
+            assert_eq!(p(bad), None, "{bad}");
+        }
     }
 
     #[test]

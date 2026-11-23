@@ -204,7 +204,8 @@ cpasfait-report last-week --by tab,task,tags --me
 ```
 
 - `PERIOD`: `today`, `yesterday`, `this-week`, `last-week` (weeks start on
-  Monday), `this-month`, `last-month`, `this-year`, `last-year`. Without one,
+  Monday), `this-month`, `last-month`, `this-year`, `last-year`, or an ISO
+  week: `week 23` (this year), `week 23 2025`, `w23`, `2025-W23`. Without one,
   `--from`/`--to` (default: the last 7 days); dates accept `2026-11-01`,
   `today`, `yesterday`, `-1w`, `mon`, and so on.
 - `--by` (comma-separated, one section each): `task` (default; subtask time
