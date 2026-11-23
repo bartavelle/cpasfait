@@ -542,7 +542,7 @@ fn render_time_box(f: &mut Frame, app: &App, body: Rect) {
     let (Some(tab), true) = (app.tab(), app.time_period != TimePeriod::Hidden) else {
         return;
     };
-    let lines = timebox::compute(&app.repo, &app.tree, tab.id, app.time_period, &app.tz);
+    let lines = timebox::compute(&app.repo, &app.tree, tab.id, &app.tabs, app.time_period, &app.tz);
     let total: i64 = lines.iter().map(|l| l.ms).sum();
     let width = body.width.min(44);
     let max_rows = body.height.saturating_sub(4).max(1) as usize;

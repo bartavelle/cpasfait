@@ -150,7 +150,7 @@ Editing       n        new task (beside this one)       a      new subtask
 Work log      s        start/stop working on the task   S      stop running work at…
               W        switch to this task at…          (times: 14:30, -20m, yesterday 18:00)
 View          H        hide/show done tasks             D      toggle detail pane
-              T        time spent box: hidden → today → this week → this month
+              T        time spent (all tabs): hidden → today → this week → month
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q
               :require  :block  :unrequire  :unblock  (pick the other task)

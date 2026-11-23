@@ -1,8 +1,8 @@
-//! The "time spent" box: time logged per task of the current tab over a
-//! period (today, this week, this month), largest first.
+//! The "time spent" box: time logged per task, in all tabs, over a period
+//! (today, this week, this month), largest first.
 
 use cpasfait_core::report::{Filter, slices};
-use cpasfait_core::{Repo, TabId, TaskId, Tree};
+use cpasfait_core::{Repo, TabId, TabInfo, TaskId, Tree};
 use jiff::civil::Weekday;
 use jiff::tz::TimeZone;
 use std::collections::HashMap;
@@ -65,40 +65,56 @@ pub struct TimeLine {
     pub ms: i64,
 }
 
-/// Time logged directly on each task of `tab` (all users) since the start of
-/// `period`, largest first. Parents are not credited with their subtasks'
-/// time, so the lines add up to the total.
-pub fn compute(repo: &Repo, tree: &Tree, tab: TabId, period: TimePeriod, tz: &TimeZone) -> Vec<TimeLine> {
+/// Time logged directly on each task, in all tabs (all users), since the
+/// start of `period`, largest first. Parents are not credited with their
+/// subtasks' time, so the lines add up to the total. `tree` is the current
+/// tab's (`tab`); tasks of other tabs get their tab's name after the title.
+pub fn compute(
+    repo: &Repo,
+    tree: &Tree,
+    tab: TabId,
+    tabs: &[TabInfo],
+    period: TimePeriod,
+    tz: &TimeZone,
+) -> Vec<TimeLine> {
     let now = repo.now_ms();
     let Some(from) = period.start(now, tz) else {
         return vec![];
     };
-    let filter = Filter {
-        tab: Some(tab),
-        user: None,
-    };
+    let filter = Filter::default();
     let Ok(slices) = slices(repo, from, now, &filter) else {
         return vec![];
     };
-    let mut per_task: HashMap<Option<TaskId>, i64> = HashMap::new();
+    let mut per_task: HashMap<(TabId, Option<TaskId>), i64> = HashMap::new();
     for s in &slices {
-        *per_task.entry(s.task).or_default() += s.ms();
+        *per_task.entry((s.tab, s.task)).or_default() += s.ms();
     }
+    let untitled = |t: &str| {
+        if t.is_empty() {
+            "(untitled)".to_owned()
+        } else {
+            t.to_owned()
+        }
+    };
     let mut lines: Vec<TimeLine> = per_task
         .into_iter()
-        .map(|(task, ms)| {
-            let title = match task {
+        .map(|((task_tab, task), ms)| {
+            let mut title = match task {
                 None => "(no task)".to_owned(),
-                Some(id) => match tree.get(id) {
-                    Some(t) if t.title.is_empty() => "(untitled)".to_owned(),
-                    Some(t) => t.title.clone(),
-                    // Deleted, or hidden under a deleted parent.
+                Some(id) => match tree.get(id).filter(|_| task_tab == tab) {
+                    Some(t) => untitled(&t.title),
+                    // Another tab's, or deleted (or hidden under a deleted parent).
                     None => match repo.task(id) {
-                        Ok(t) => format!("{} (deleted)", t.title),
+                        Ok(t) if t.deleted || task_tab == tab => format!("{} (deleted)", untitled(&t.title)),
+                        Ok(t) => untitled(&t.title),
                         Err(_) => "(unknown task)".to_owned(),
                     },
                 },
             };
+            if task_tab != tab {
+                let name = tabs.iter().find(|t| t.id == task_tab).map_or("?", |t| t.name.as_str());
+                title = format!("{title} [{name}]");
+            }
             TimeLine { task, title, ms }
         })
         .collect();

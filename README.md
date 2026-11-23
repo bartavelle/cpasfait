@@ -49,7 +49,7 @@ Press `?` in the TUI for all keys. The essentials:
 - Forgot to stop or switch? `S` stops what is running and `W` switches to the selected task, at a time you give: they open the command line prefilled with the current time (`:stop 14:32`, `:switch 14:32`), Enter to accept or edit it first. Times: `14:30` (a time not reached yet today is yesterday's), `-20m`, `-1h30`, `yesterday 18:00`, `2026-11-22 18:00`. With nothing running, `W` starts the task back-dated (not before your last session ended)
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
-- `T` shows time spent per task in a box at the lower right, cycling through hidden, today, this week and this month
+- `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`), in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
 - `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (default 0)
 - `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task

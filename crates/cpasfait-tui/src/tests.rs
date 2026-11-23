@@ -696,3 +696,27 @@ fn stop_and_switch_at_a_given_time() {
     press(&mut app, "k:switch 11:15<enter>");
     assert_eq!(message(&app), "working on \"Alpha\" since 11:15");
 }
+
+#[test]
+fn time_box_counts_all_tabs() {
+    let (mut app, time) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
+    let add = |m: i64| {
+        time.fetch_add(m * 60_000, Ordering::SeqCst);
+    };
+    press(&mut app, "nHere<enter>s");
+    add(30);
+    press(&mut app, ":tabnew Home<enter>nChores<enter>s");
+    add(45);
+    press(&mut app, "dd"); // time on a deleted task still counts
+    press(&mut app, "nDishes<enter>s");
+    add(10);
+    press(&mut app, "gTT"); // back to the first tab
+    let s = screen(&mut app, 90, 12);
+    let boxed = &s[s.find("time ·").unwrap()..];
+    assert!(boxed.contains("total 1h 25m"), "{s}");
+    for line in ["Chores (deleted) [Home]", "Here ", "Dishes [Home]"] {
+        assert!(boxed.contains(line), "{line}\n{s}");
+    }
+    assert!(boxed.find("Chores").unwrap() < boxed.find("Here").unwrap(), "{s}");
+}
