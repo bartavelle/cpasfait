@@ -64,6 +64,7 @@ Press `?` in the TUI for all keys. The essentials:
 - `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`; deleted tasks and their subtasks are left out), in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
 - `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (-3 to 3, default 0)
+- `:moveto TAB` (or `:mv`) moves the task, with its subtasks, metadata and work log, to the end of another tab. Tasks belong to their tab's op log (and its encryption key and members), so the move copies them there under new ids and deletes the originals; their sessions move with them (time is counted once, a running session keeps running), and tasks that required them follow the copies. Members of the old tab who are not in the new one no longer see the task. It is refused while someone else is working on one of the tasks
 - `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task
 
 ### Sharing a tab

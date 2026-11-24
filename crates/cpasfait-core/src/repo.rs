@@ -130,6 +130,17 @@ const OP_COLS: &str = "hlc_wall, hlc_counter, device, seq, tab, entity, field, v
 /// A local edit: `entity.field = value` in `tab`.
 pub type Edit = (TabId, Uuid, Change);
 
+/// Result of [`Repo::move_to_tab`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Moved {
+    /// The moved task's new id.
+    pub id: TaskId,
+    /// Tasks moved (the task and its subtasks).
+    pub tasks: usize,
+    /// Work sessions moved with them.
+    pub sessions: usize,
+}
+
 impl Repo {
     /// Open (creating if needed) a read-write database.
     pub fn open(path: impl AsRef<Path>) -> Result<Repo> {
@@ -673,6 +684,160 @@ impl Repo {
             edits.push((t.tab, task.0, Change::TaskParent(parent)));
         }
         self.commit(edits)
+    }
+
+    /// Move `task`, with its subtasks, metadata and work log, to another tab
+    /// (at `place` there). Tasks belong to their tab's op log, so this copies
+    /// them into `to` under new ids and removes the originals: their
+    /// sessions are deleted and recreated on the copies (same user, device,
+    /// times and notes, so the time is counted once), and tasks that
+    /// required a moved task now require its copy. Members of the old tab
+    /// who are not in the new one no longer see it. Refused while someone
+    /// else is working on one of the tasks (their running session would be
+    /// taken from under them). Deleted subtasks stay behind.
+    pub fn move_to_tab(&mut self, task: TaskId, to: TabId, place: Place) -> Result<Moved> {
+        let root = self.task(task)?;
+        let from = root.tab;
+        if from == to {
+            return Err(Error::Invalid("the task is already in that tab".into()));
+        }
+        if root.deleted {
+            return Err(Error::Invalid("that task is deleted".into()));
+        }
+        self.tabs()?
+            .iter()
+            .find(|t| t.id == to)
+            .ok_or_else(|| Error::NotFound(format!("tab {to}")))?;
+        // The subtree, parents first, without deleted tasks.
+        let all = self.tasks(from)?;
+        let mut moved = vec![root];
+        let mut i = 0;
+        while i < moved.len() {
+            let id = moved[i].id;
+            moved.extend(all.iter().filter(|t| t.parent == Some(id) && !t.deleted).cloned());
+            i += 1;
+        }
+        let ids: std::collections::HashMap<TaskId, TaskId> = moved.iter().map(|t| (t.id, TaskId::new())).collect();
+        let mut sessions = vec![];
+        for t in &moved {
+            for s in self.sessions_for_task(t.id)? {
+                if s.is_open() && s.device != Some(self.device) {
+                    return Err(Error::Invalid(format!(
+                        "{} is working on {:?}: move it once they have stopped",
+                        s.user, t.title
+                    )));
+                }
+                sessions.push(s);
+            }
+        }
+
+        let (parent, position) = self.placement(to, place, None)?;
+        let mut edits: Vec<Edit> = vec![];
+        for (i, t) in moved.iter().enumerate() {
+            let new = ids[&t.id].0;
+            let mut e = |c: Change| edits.push((to, new, c));
+            e(Change::TaskTitle(t.title.clone()));
+            if i == 0 {
+                e(Change::TaskPosition(position.clone()));
+                if parent.is_some() {
+                    e(Change::TaskParent(parent));
+                }
+            } else {
+                e(Change::TaskPosition(t.position.clone()));
+                e(Change::TaskParent(t.parent.map(|p| ids[&p])));
+            }
+            if !t.notes.is_empty() {
+                e(Change::TaskNotes(t.notes.clone()));
+            }
+            if t.status != Status::Todo {
+                e(Change::TaskStatus(t.status));
+            }
+            if t.priority != 0 {
+                e(Change::TaskPriority(t.priority));
+            }
+            if t.due.is_some() {
+                e(Change::TaskDue(t.due));
+            }
+            for tag in &t.tags {
+                e(Change::TaskTag { tag: tag.clone(), on: true });
+            }
+            if let Some(a) = &t.author {
+                e(Change::TaskAuthor(a.clone()));
+            }
+            for (blocker, tab) in self.requirements(t.id)? {
+                let (blocker, tab) = match ids.get(&blocker) {
+                    Some(&b) => (b, Some(to)),
+                    None => (blocker, tab),
+                };
+                e(Change::TaskBlockedBy { task: blocker, tab, on: true });
+            }
+            edits.push((from, t.id.0, Change::TaskDeleted(true)));
+        }
+        // Tasks elsewhere that required a moved task: point them to the copy.
+        for t in &moved {
+            let mut st = self.conn.prepare_cached(
+                "SELECT d.task, t.tab FROM task_dep d JOIN task t ON t.id = d.task WHERE d.blocker = ?1",
+            )?;
+            let dependents: Vec<(String, String)> = st
+                .query_map(params![t.id.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (dep, dep_tab) in dependents {
+                let (dep, dep_tab): (TaskId, TabId) = (parse_id(&dep)?, parse_id(&dep_tab)?);
+                if ids.contains_key(&dep) {
+                    continue; // copied above
+                }
+                edits.push((dep_tab, dep.0, Change::TaskBlockedBy { task: t.id, tab: None, on: false }));
+                edits.push((
+                    dep_tab,
+                    dep.0,
+                    Change::TaskBlockedBy {
+                        task: ids[&t.id],
+                        tab: Some(to),
+                        on: true,
+                    },
+                ));
+            }
+        }
+        for s in &sessions {
+            let Some(task) = s.task.and_then(|t| ids.get(&t)) else {
+                continue;
+            };
+            let new = SessionId::new().0;
+            edits.push((to, new, Change::SessionTask(*task)));
+            if let Some(d) = s.device {
+                edits.push((to, new, Change::SessionDevice(d)));
+            }
+            edits.push((to, new, Change::SessionUser(s.user.clone())));
+            if let Some(start) = s.start {
+                edits.push((to, new, Change::SessionStart(start)));
+            }
+            if s.end.is_some() {
+                edits.push((to, new, Change::SessionEnd(s.end)));
+            }
+            if !s.note.is_empty() {
+                edits.push((to, new, Change::SessionNote(s.note.clone())));
+            }
+            edits.push((from, s.id.0, Change::SessionDeleted(true)));
+        }
+        self.commit(edits)?;
+        Ok(Moved {
+            id: ids[&task],
+            tasks: moved.len(),
+            sessions: sessions.len(),
+        })
+    }
+
+    /// The tasks `task` requires, with their tab when known.
+    fn requirements(&self, task: TaskId) -> Result<Vec<(TaskId, Option<TabId>)>> {
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT blocker, blocker_tab FROM task_dep WHERE task = ?1")?;
+        let rows: Vec<(String, Option<String>)> = st
+            .query_map(params![task.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        rows.into_iter()
+            .map(|(b, t)| Ok((parse_id(&b)?, t.map(|t| parse_id(&t)).transpose()?)))
+            .collect()
     }
 
     /// Make the task a child of its previous sibling (in display order).

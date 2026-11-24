@@ -830,3 +830,24 @@ fn detail_pane_shows_latest_sessions() {
     assert_eq!(s.matches("10m alice").count(), 8, "{s}");
     assert!(s.contains("… 4 older sessions, E to edit"), "{s}");
 }
+
+#[test]
+fn move_task_to_another_tab() {
+    let (mut app, time) = app();
+    press(&mut app, ":tabnew Home<enter>gT");
+    press(&mut app, "nPaint<enter>aBuy paint<enter>ks");
+    time.fetch_add(600_000, Ordering::SeqCst);
+    press(&mut app, ":moveto nowhere<enter>");
+    assert!(message(&app).contains("nowhere"), "{}", message(&app));
+    press(&mut app, ":moveto ho<enter>");
+    assert_eq!(
+        message(&app),
+        "moved \"Paint\" with 1 subtask and 1 work session to Home"
+    );
+    assert!(app.rows.is_empty());
+    press(&mut app, "gt");
+    assert_eq!(titles(&app), ["Paint", "  Buy paint"]);
+    // still working on it
+    let active = app.active.clone().unwrap();
+    assert_eq!(active.task, Some(app.rows[0].id));
+}

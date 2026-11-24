@@ -1,5 +1,6 @@
 ---
 source: crates/cpasfait-tui/src/tests.rs
+assertion_line: 202
 expression: "screen(&mut app, 100, 32)"
 ---
  1:inbox                                                                                      alice
@@ -23,6 +24,7 @@ expression: "screen(&mut app, 100, 32)"
  │Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b                  │
  │              :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q                 │
  │              :require  :block  :unrequire  :unblock  (pick the other task)                    │
+ │              :moveto TAB  move the task, its subtasks and work log to another tab             │
  │              :tabnew NAME   :tabrename NAME   :tabclose!                                      │
  │              :tabset [NAME [VALUE]]   :tabunset NAME   tab settings (default_priority)        │
  │              :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild                     │
@@ -32,5 +34,4 @@ expression: "screen(&mut app, 100, 32)"
  │              :tabmove REMOTE  move it for everyone   :tabaccept  follow a move (⇅↪)           │
  │j/k ^d/^u Space scroll, q Esc ? close this help.                                               │
  └───────────────────────────────────────────────────────────────────────────────────────────────┘
-                                                           │
  NORMAL                                                                           ⏱ Project 0:00:00

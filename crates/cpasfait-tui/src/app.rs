@@ -922,6 +922,31 @@ impl App {
                 self.repo.set_priority(t, p)?;
                 self.refresh()?;
             }
+            "moveto" | "mv" => {
+                let t = need_task(self)?;
+                if arg.is_empty() {
+                    bail!("usage: :moveto TAB (name or prefix)");
+                }
+                let to = self.repo.find_tab(arg)?;
+                let title = self.repo.task(t)?.title;
+                let moved = self.repo.move_to_tab(t, to.id, Place::LastChildOf(None))?;
+                self.refresh()?;
+                let mut what = vec![];
+                if moved.tasks > 1 {
+                    let n = moved.tasks - 1;
+                    what.push(format!("{n} subtask{}", if n > 1 { "s" } else { "" }));
+                }
+                if moved.sessions > 0 {
+                    let n = moved.sessions;
+                    what.push(format!("{n} work session{}", if n > 1 { "s" } else { "" }));
+                }
+                let with = if what.is_empty() {
+                    String::new()
+                } else {
+                    format!(" with {}", what.join(" and "))
+                };
+                self.info(format!("moved {title:?}{with} to {}", to.name));
+            }
             "edit" => {
                 let t = need_task(self)?;
                 let since = match arg {

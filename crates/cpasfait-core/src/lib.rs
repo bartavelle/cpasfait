@@ -30,5 +30,5 @@ pub use model::{
     TAB_SETTINGS, TabInfo, TabSettings, Task,
 };
 pub use op::{Change, Op, Status};
-pub use repo::{Place, Repo};
+pub use repo::{Moved, Place, Repo};
 pub use tree::{Row, Tree};

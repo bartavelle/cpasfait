@@ -157,6 +157,7 @@ View          H        hide/show done tasks             D      toggle detail pan
 Commands      :due DATE|none  (2026-12-01, today, tom, +3d, fri)   :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q
               :require  :block  :unrequire  :unblock  (pick the other task)
+              :moveto TAB  move the task, its subtasks and work log to another tab
               :tabnew NAME   :tabrename NAME   :tabclose!
               :tabset [NAME [VALUE]]   :tabunset NAME   tab settings (default_priority)
               :tabremote REMOTE|none   :tabjoin REMOTE [TAB-ID]   :rebuild

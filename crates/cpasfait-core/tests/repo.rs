@@ -452,3 +452,102 @@ fn low_priorities() {
     let t = r.add_task(tab, Place::LastChildOf(None), "x").unwrap();
     assert_eq!(r.task(t).unwrap().priority, -2);
 }
+
+#[test]
+fn move_a_task_to_another_tab() {
+    use cpasfait_core::{Change, DeviceId, SessionId};
+    let (mut r, time) = repo_with_clock();
+    let min = 60_000;
+    let (a, b) = (r.create_tab("a").unwrap(), r.create_tab("b").unwrap());
+    let root = r.add_task(a, Place::LastChildOf(None), "project").unwrap();
+    let child = r.add_task(a, Place::LastChildOf(Some(root)), "step 1").unwrap();
+    let gone = r.add_task(a, Place::LastChildOf(Some(root)), "deleted step").unwrap();
+    let grandchild = r.add_task(a, Place::LastChildOf(Some(child)), "step 1.1").unwrap();
+    let stays = r.add_task(a, Place::LastChildOf(None), "prerequisite").unwrap();
+    let waits = r.add_task(a, Place::LastChildOf(None), "after step 1").unwrap();
+    r.add_task(b, Place::LastChildOf(None), "already in b").unwrap();
+    r.set_priority(root, 2).unwrap();
+    r.set_due(root, Some(jiff::civil::date(2026, 12, 1))).unwrap();
+    r.set_tag(root, "acme", true).unwrap();
+    r.set_notes(root, "some notes").unwrap();
+    r.toggle_done(grandchild).unwrap();
+    r.set_blocked_by(root, stays, true).unwrap();
+    r.set_blocked_by(grandchild, child, false).unwrap();
+    r.set_blocked_by(waits, child, true).unwrap();
+    r.delete_task(gone).unwrap();
+    // work log: a finished session on the root, a running one on the child
+    r.start_work(root).unwrap();
+    time.fetch_add(30 * min, Ordering::SeqCst);
+    let s = r.start_work(child).unwrap();
+    r.set_session_note(s, "started").unwrap();
+    time.fetch_add(10 * min, Ordering::SeqCst);
+    let total_before: i64 = report::slices(&r, 0, i64::MAX / 2, &Filter::default())
+        .unwrap()
+        .iter()
+        .map(|s| s.ms())
+        .sum();
+
+    // someone else working on it: refused
+    let other = SessionId::new();
+    r.commit(vec![
+        (a, other.0, Change::SessionTask(grandchild)),
+        (a, other.0, Change::SessionDevice(DeviceId::new())),
+        (a, other.0, Change::SessionUser("bob".into())),
+        (a, other.0, Change::SessionStart(time.load(Ordering::SeqCst))),
+    ])
+    .unwrap();
+    let e = r.move_to_tab(root, b, Place::LastChildOf(None)).unwrap_err();
+    assert!(e.to_string().contains("bob is working on \"step 1.1\""), "{e}");
+    r.commit(vec![(a, other.0, Change::SessionDeleted(true))]).unwrap();
+    assert!(r.move_to_tab(root, a, Place::LastChildOf(None)).is_err());
+
+    let moved = r.move_to_tab(root, b, Place::LastChildOf(None)).unwrap();
+    assert_eq!((moved.tasks, moved.sessions), (3, 2));
+
+    // the originals are gone from a
+    let tree_a = r.tree(a).unwrap();
+    let rows: Vec<_> = tree_a.rows(&Default::default(), false).iter().map(|r| r.id).collect();
+    assert_eq!(rows, [stays, waits]);
+    assert!(r.sessions_for_task(root).unwrap().is_empty());
+    // the copies in b, with their metadata
+    let tree_b = r.tree(b).unwrap();
+    let rows: Vec<_> = tree_b
+        .rows(&Default::default(), false)
+        .iter()
+        .map(|row| (row.depth, tree_b.get(row.id).unwrap().title.clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (0, "project".to_owned()), // priority 2: first
+            (1, "step 1".into()),
+            (2, "step 1.1".into()),
+            (0, "already in b".into()),
+        ]
+    );
+    let p = r.task(moved.id).unwrap();
+    assert_eq!((p.priority, p.notes.as_str(), p.tags.clone()), (2, "some notes", vec!["acme".to_owned()]));
+    assert_eq!(p.due, Some(jiff::civil::date(2026, 12, 1)));
+    assert_eq!(p.author.as_ref().map(|a| a.name.as_str()), Some(r.user()));
+    assert_eq!(p.blocked_by, vec![stays]);
+    let new_child = tree_b.children(Some(moved.id))[0];
+    let new_grandchild = tree_b.children(Some(new_child))[0];
+    assert!(r.task(new_grandchild).unwrap().is_done());
+    // a task left behind now requires the copy
+    assert_eq!(r.task(waits).unwrap().blocked_by, vec![new_child]);
+    assert!(r.tree(a).unwrap().is_blocked(waits));
+    // the work log moved, time counted once, the running session goes on
+    let active = r.active_session().unwrap().unwrap();
+    assert_eq!((active.task, active.tab, active.note.as_str()), (Some(new_child), b, "started"));
+    assert_eq!(r.sessions_for_task(moved.id).unwrap()[0].duration_ms(0), 30 * min);
+    let total_after: i64 = report::slices(&r, 0, i64::MAX / 2, &Filter::default())
+        .unwrap()
+        .iter()
+        .map(|s| s.ms())
+        .sum();
+    assert_eq!(total_after, total_before);
+    // and it all survives a rebuild from the op log
+    let before = r.dump_model().unwrap();
+    r.rebuild().unwrap();
+    assert_eq!(r.dump_model().unwrap(), before);
+}
