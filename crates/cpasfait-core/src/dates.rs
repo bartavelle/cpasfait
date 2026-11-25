@@ -164,6 +164,40 @@ fn time_of_day(s: &str) -> Option<(i8, i8)> {
     ((0..24).contains(&h) && (0..60).contains(&m) && h.to_string().len() <= 2).then_some((h, m))
 }
 
+/// Parse a due date relative to `today`: a date as in [`parse_date`],
+/// optionally followed by a time (`fri 14:30`, `2026-12-01 14:30:05`,
+/// `tom 9h`), or a time alone, which is today (`17:00`). Also the ISO form
+/// `2026-12-01T14:30`.
+pub fn parse_due(s: &str, today: Date) -> Option<crate::due::Due> {
+    use crate::due::Due;
+    let s = s.trim().to_lowercase();
+    if let Ok(d) = s.parse::<Due>() {
+        return Some(d);
+    }
+    if let Some(t) = clock(&s) {
+        return Some(Due::at(today, t));
+    }
+    if let Some((day, time)) = s.rsplit_once(char::is_whitespace)
+        && let Some(t) = clock(time)
+    {
+        return Some(Due::at(parse_date(day, today)?, t));
+    }
+    parse_date(&s, today).map(Due::day)
+}
+
+/// `14:30`, `14:30:05`, `14h30`, `14h`, `9:05`.
+fn clock(s: &str) -> Option<jiff::civil::Time> {
+    let (hm, sec) = match s.matches(':').count() {
+        2 => {
+            let (hm, sec) = s.rsplit_once(':')?;
+            (hm, sec.parse::<i8>().ok().filter(|s| (0..60).contains(s) && sec.len() == 2)?)
+        }
+        _ => (s, 0),
+    };
+    let (h, m) = time_of_day(hm)?;
+    jiff::civil::Time::new(h, m, sec, 0).ok()
+}
+
 pub fn today_local() -> Date {
     jiff::ZonedDateTime::now().date()
 }
@@ -186,6 +220,26 @@ mod tests {
         assert_eq!(parse_date("Monday", today), Some(date(2026, 11, 23)));
         assert_eq!(parse_date("m", today), None);
         assert_eq!(parse_date("garbage", today), None);
+    }
+
+    #[test]
+    fn dues() {
+        use crate::due::Due;
+        use jiff::civil::time;
+        let today = date(2026, 11, 20); // a Friday
+        let p = |s| parse_due(s, today);
+        assert_eq!(p("2026-12-01"), Some(Due::day(date(2026, 12, 1))));
+        assert_eq!(p("fri"), Some(Due::day(date(2026, 11, 27))));
+        assert_eq!(p("17:00"), Some(Due::at(today, time(17, 0, 0, 0))));
+        assert_eq!(p("9h"), Some(Due::at(today, time(9, 0, 0, 0))));
+        assert_eq!(p("tom 9h30"), Some(Due::at(date(2026, 11, 21), time(9, 30, 0, 0))));
+        assert_eq!(p("mon 08:15:30"), Some(Due::at(date(2026, 11, 23), time(8, 15, 30, 0))));
+        assert_eq!(p("2026-12-01 14:30:05"), Some(Due::at(date(2026, 12, 1), time(14, 30, 5, 0))));
+        assert_eq!(p("2026-12-01T14:30"), Some(Due::at(date(2026, 12, 1), time(14, 30, 0, 0))));
+        assert_eq!(p(" +3d  18:00 "), Some(Due::at(date(2026, 11, 23), time(18, 0, 0, 0))));
+        for bad in ["25:00", "12:00:60", "12:00:5", "fri 25:00", "noon", "x 12:00", ""] {
+            assert_eq!(p(bad), None, "{bad}");
+        }
     }
 
     #[test]

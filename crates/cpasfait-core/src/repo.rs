@@ -130,6 +130,16 @@ const OP_COLS: &str = "hlc_wall, hlc_counter, device, seq, tab, entity, field, v
 /// A local edit: `entity.field = value` in `tab`.
 pub type Edit = (TabId, Uuid, Change);
 
+/// A task that has fallen due (see [`Repo::take_due_notices`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DueNotice {
+    pub task: TaskId,
+    pub tab: TabId,
+    pub tab_name: String,
+    pub title: String,
+    pub due: crate::due::Due,
+}
+
 /// Result of [`Repo::move_to_tab`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Moved {
@@ -896,7 +906,7 @@ impl Repo {
         self.set_task(task, Change::TaskPriority(priority))
     }
 
-    pub fn set_due(&mut self, task: TaskId, due: Option<jiff::civil::Date>) -> Result<()> {
+    pub fn set_due(&mut self, task: TaskId, due: Option<crate::due::Due>) -> Result<()> {
         self.set_task(task, Change::TaskDue(due))
     }
 
@@ -1093,6 +1103,72 @@ impl Repo {
 
     pub fn undelete_task(&mut self, task: TaskId) -> Result<()> {
         self.set_task(task, Change::TaskDeleted(false))
+    }
+
+    // ---------------------------------------------------- due notifications
+
+    /// Open tasks (all tabs) that have fallen due (in `tz`) and were not
+    /// announced yet, oldest due first; they are marked as announced, so
+    /// each due date is returned once, even to several processes sharing
+    /// the database. Tasks under a deleted or done parent are skipped.
+    pub fn take_due_notices(&mut self, tz: &jiff::tz::TimeZone) -> Result<Vec<DueNotice>> {
+        let now = self.now_ms();
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rows: Vec<(String, String, String, String, Option<String>, String)> = {
+            let mut st = tx.prepare(
+                "SELECT t.id, t.tab, t.title, t.due, t.parent, tab.name FROM task t JOIN tab ON tab.id = t.tab
+                 WHERE t.due IS NOT NULL AND t.deleted = 0 AND t.status = 'todo' AND tab.deleted = 0
+                   AND NOT EXISTS (SELECT 1 FROM due_notified n WHERE n.task = t.id AND n.due = t.due)",
+            )?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        let mut out = vec![];
+        for (id, tab, title, due_text, parent, tab_name) in rows {
+            let Ok(due) = due_text.parse::<crate::due::Due>() else {
+                continue;
+            };
+            if due.moment_ms(tz).is_none_or(|m| m > now) {
+                continue;
+            }
+            // under a deleted or done parent?
+            let mut p = parent;
+            let mut hidden = false;
+            for _ in 0..1000 {
+                let Some(pid) = p else { break };
+                let row: Option<(bool, String, Option<String>)> = tx
+                    .query_row(
+                        "SELECT deleted, status, parent FROM task WHERE id = ?1",
+                        params![pid],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )
+                    .optional()?;
+                match row {
+                    Some((deleted, status, next)) if !deleted && status == "todo" => p = next,
+                    Some(_) => {
+                        hidden = true;
+                        break;
+                    }
+                    None => break,
+                }
+            }
+            tx.execute(
+                "INSERT INTO due_notified(task, due) VALUES (?1, ?2) ON CONFLICT(task) DO UPDATE SET due = ?2",
+                params![id, due_text],
+            )?;
+            if !hidden {
+                out.push(DueNotice {
+                    task: parse_id(&id)?,
+                    tab: parse_id(&tab)?,
+                    tab_name,
+                    title,
+                    due,
+                });
+            }
+        }
+        tx.commit()?;
+        out.sort_by_key(|n| n.due);
+        Ok(out)
     }
 
     // ------------------------------------------------------------- work log

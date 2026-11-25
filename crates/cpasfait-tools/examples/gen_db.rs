@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
             }
             if rng.random_bool(0.2) {
                 let d = jiff::civil::date(2026, rng.random_range(1..13), rng.random_range(1..29));
-                edits.push((tab, id.0, Change::TaskDue(Some(d))));
+                edits.push((tab, id.0, Change::TaskDue(Some(cpasfait_core::Due::day(d)))));
             }
             if rng.random_bool(0.2) {
                 edits.push((

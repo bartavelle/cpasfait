@@ -8,7 +8,7 @@ use crate::timebox::{self, TimePeriod};
 use cpasfait_core::dates::today_local;
 use cpasfait_core::report::fmt_duration;
 use cpasfait_core::score::Score;
-use cpasfait_core::{DepInfo, DepState, Session, Task};
+use cpasfait_core::{DepInfo, DepState, Due, Session, Task};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -75,11 +75,19 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn due_style(due: jiff::civil::Date) -> Style {
-    let today = today_local();
-    if due < today {
+/// Red once due, bold yellow on the day, else yellow.
+fn due_style(app: &App, due: Due) -> Style {
+    let now = app.repo.now_ms();
+    let today = jiff::Timestamp::from_millisecond(now)
+        .map(|t| t.to_zoned_datetime(app.tz.clone()).date())
+        .unwrap_or_else(|_| today_local());
+    let overdue = match due.time {
+        None => due.date < today,
+        Some(_) => due.moment_ms(&app.tz).is_some_and(|m| m <= now),
+    };
+    if overdue {
         Style::new().fg(Color::Red).bold()
-    } else if due == today {
+    } else if due.date == today {
         Style::new().fg(Color::Yellow).bold()
     } else {
         Style::new().fg(Color::Yellow)
@@ -93,7 +101,7 @@ fn task_suffix<'a>(app: &App, t: &'a Task) -> Vec<Span<'a>> {
         v.push(Span::styled("  ⊘blocked", Style::new().fg(Color::Red)));
     }
     if let Some(d) = t.due {
-        v.push(Span::styled(format!("  ⌛{d}"), due_style(d)));
+        v.push(Span::styled(format!("  ⌛{d}"), due_style(app, d)));
     }
     for tag in &t.tags {
         v.push(Span::styled(format!(" #{tag}"), Style::new().fg(Color::Cyan)));
@@ -247,7 +255,7 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             label("due"),
             match t.due {
-                Some(d) => Span::styled(d.to_string(), due_style(d)),
+                Some(d) => Span::styled(d.to_string(), due_style(app, d)),
                 None => Span::raw("-"),
             },
         ]),

@@ -88,6 +88,9 @@ pub struct App {
     pub detail_deps: cpasfait_core::Dependencies,
     pub next: Option<TaskId>,
     pub sync_status: Option<String>,
+    /// Announce tasks falling due with desktop notifications (see
+    /// [`App::due_notifications`]).
+    pub notify: bool,
     /// This user's secret key, loaded (or created) on first need.
     pub identity: Option<Identity>,
     /// Remote moves already announced in the message line.
@@ -130,6 +133,7 @@ impl App {
             detail_deps: Default::default(),
             next: None,
             sync_status: None,
+            notify: false,
             identity: None,
             notified_moves: HashSet::new(),
             requests: vec![],
@@ -808,6 +812,23 @@ impl App {
             .unwrap_or_else(|| "(unknown task)".into())
     }
 
+    /// Tasks that have just fallen due, as notifications to show (each due
+    /// date once; also shown in the message line). Nothing when
+    /// notifications are off.
+    pub fn due_notifications(&mut self) -> Result<Vec<cpasfait_core::notify::Notification>> {
+        if !self.notify {
+            return Ok(vec![]);
+        }
+        let notices = self.repo.take_due_notices(&self.tz)?;
+        if let Some(n) = notices.last() {
+            self.info(match notices.len() {
+                1 => format!("due: {:?} ({})", n.title, n.due),
+                k => format!("{k} tasks are due, the last {:?} ({})", n.title, n.due),
+            });
+        }
+        Ok(cpasfait_core::notify::notifications(&notices))
+    }
+
     /// Local midnight starting `day` (default: [`EDIT_DAYS`] days ago).
     fn edit_since(&self, day: Option<jiff::civil::Date>) -> Result<Option<i64>> {
         let day = match day {
@@ -881,7 +902,9 @@ impl App {
                 let t = need_task(self)?;
                 let due = match arg {
                     "" | "none" | "-" => None,
-                    s => Some(parse_date(s, today_local()).ok_or_else(|| anyhow!("can't parse date {s:?}"))?),
+                    s => Some(cpasfait_core::dates::parse_due(s, self.repo.today()).ok_or_else(|| {
+                        anyhow!("can't parse due date {s:?} (2026-12-01, fri, tom 9:00, 17:30, 2026-12-01 14:30:05)")
+                    })?),
                 };
                 self.repo.set_due(t, due)?;
                 self.refresh()?;

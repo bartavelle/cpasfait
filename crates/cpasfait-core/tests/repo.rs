@@ -168,14 +168,14 @@ fn next_task_and_persistence() {
         let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
         r.set_priority(b, 2).unwrap();
         r.set_tag(a, "x", true).unwrap();
-        r.set_due(a, Some(jiff::civil::date(2026, 1, 1))).unwrap();
+        r.set_due(a, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 1, 1)))).unwrap();
         r.set_status(b, Status::Done).unwrap();
     }
     let r = Repo::open_readonly(&path).unwrap();
     let next = r.next_task(r.find_tab("wo").unwrap().id).unwrap().unwrap();
     assert_eq!(next.title, "a");
     assert_eq!(next.tags, vec!["x"]);
-    assert_eq!(next.due, Some(jiff::civil::date(2026, 1, 1)));
+    assert_eq!(next.due, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 1, 1))));
     let _ = tab;
 }
 
@@ -232,7 +232,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
     };
     {
         let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; ALTER TABLE task DROP COLUMN author_name; ALTER TABLE task DROP COLUMN author_email; ALTER TABLE device DROP COLUMN email; PRAGMA user_version = 1;")
+        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; DROP TABLE due_notified; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; ALTER TABLE task DROP COLUMN author_name; ALTER TABLE task DROP COLUMN author_email; ALTER TABLE device DROP COLUMN email; PRAGMA user_version = 1;")
             .unwrap();
     }
     // The read-only open used by the companion tools migrates too.
@@ -467,7 +467,7 @@ fn move_a_task_to_another_tab() {
     let waits = r.add_task(a, Place::LastChildOf(None), "after step 1").unwrap();
     r.add_task(b, Place::LastChildOf(None), "already in b").unwrap();
     r.set_priority(root, 2).unwrap();
-    r.set_due(root, Some(jiff::civil::date(2026, 12, 1))).unwrap();
+    r.set_due(root, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 12, 1)))).unwrap();
     r.set_tag(root, "acme", true).unwrap();
     r.set_notes(root, "some notes").unwrap();
     r.toggle_done(grandchild).unwrap();
@@ -527,7 +527,7 @@ fn move_a_task_to_another_tab() {
     );
     let p = r.task(moved.id).unwrap();
     assert_eq!((p.priority, p.notes.as_str(), p.tags.clone()), (2, "some notes", vec!["acme".to_owned()]));
-    assert_eq!(p.due, Some(jiff::civil::date(2026, 12, 1)));
+    assert_eq!(p.due, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 12, 1))));
     assert_eq!(p.author.as_ref().map(|a| a.name.as_str()), Some(r.user()));
     assert_eq!(p.blocked_by, vec![stays]);
     let new_child = tree_b.children(Some(moved.id))[0];
@@ -550,4 +550,53 @@ fn move_a_task_to_another_tab() {
     let before = r.dump_model().unwrap();
     r.rebuild().unwrap();
     assert_eq!(r.dump_model().unwrap(), before);
+}
+
+#[test]
+fn due_notices() {
+    use cpasfait_core::Due;
+    use jiff::civil::{date, time};
+    let tz = jiff::tz::TimeZone::UTC;
+    let ms = |d: jiff::civil::Date, h: i8, m: i8| {
+        d.at(h, m, 0, 0).to_zoned_datetime(tz.clone()).unwrap().timestamp().as_millisecond()
+    };
+    let today = date(2026, 11, 25);
+    let (mut r, clock) = repo_with_clock();
+    clock.store(ms(today, 9, 0), Ordering::SeqCst);
+    let tab = r.create_tab("work").unwrap();
+    let add = |r: &mut Repo, title: &str, due: Due| {
+        let t = r.add_task(tab, Place::LastChildOf(None), title).unwrap();
+        r.set_due(t, Some(due)).unwrap();
+        t
+    };
+    let call = add(&mut r, "call", Due::at(today, time(14, 30, 0, 0)));
+    let report = add(&mut r, "report", Due::day(today)); // due since midnight
+    let done = add(&mut r, "done", Due::day(today));
+    r.toggle_done(done).unwrap();
+    let parent = r.add_task(tab, Place::LastChildOf(None), "parent").unwrap();
+    let under = r.add_task(tab, Place::LastChildOf(Some(parent)), "under deleted").unwrap();
+    r.set_due(under, Some(Due::day(today))).unwrap();
+    r.delete_task(parent).unwrap();
+    add(&mut r, "later", Due::day(date(2026, 11, 26)));
+
+    let titles = |r: &mut Repo| -> Vec<String> {
+        r.take_due_notices(&tz).unwrap().into_iter().map(|n| n.title).collect()
+    };
+    assert_eq!(titles(&mut r), ["report"]);
+    assert!(titles(&mut r).is_empty(), "announced once");
+    clock.store(ms(today, 14, 30), Ordering::SeqCst);
+    assert_eq!(titles(&mut r), ["call"]);
+    // a new due date is announced again
+    r.set_due(report, Some(Due::at(today, time(14, 0, 0, 0)))).unwrap();
+    r.set_due(call, Some(Due::at(today, time(16, 0, 0, 0)))).unwrap();
+    assert_eq!(titles(&mut r), ["report"]);
+    clock.store(ms(today, 16, 0), Ordering::SeqCst);
+    assert_eq!(titles(&mut r), ["call"]);
+    clock.store(ms(date(2026, 11, 26), 0, 0), Ordering::SeqCst);
+    let n = r.take_due_notices(&tz).unwrap();
+    assert_eq!(n[0].title, "later");
+    assert_eq!(n[0].tab_name, "work");
+    let shown = cpasfait_core::notify::notifications(&n);
+    assert_eq!(shown[0].summary, "Due: later");
+    assert_eq!(shown[0].body, "2026-11-26 · work");
 }

@@ -46,7 +46,7 @@ are ordered after them.
 | `task.notes` | string | free text |
 | `task.status` | `"todo"` \| `"done"` | default `todo` |
 | `task.priority` | integer | default 0, higher is more important (UI uses 0–9) |
-| `task.due` | `"YYYY-MM-DD"` \| null | |
+| `task.due` | `"YYYY-MM-DD"` \| `"YYYY-MM-DDTHH:MM:SS"` \| null | local (civil) time: no time zone |
 | `task.parent` | task id \| null | null/absent = root |
 | `task.position` | string | fractional index among siblings, see below |
 | `task.tag:<name>` | bool | tag present or not; one register per tag |

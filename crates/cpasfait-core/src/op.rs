@@ -71,7 +71,8 @@ pub enum Change {
     TaskStatus(Status),
     TaskPriority(i64),
     /// Due date as `YYYY-MM-DD`.
-    TaskDue(Option<jiff::civil::Date>),
+    /// Wire value: `"2026-12-01"` or `"2026-12-01T14:30:00"` (local time), or null.
+    TaskDue(Option<crate::due::Due>),
     TaskParent(Option<TaskId>),
     TaskPosition(String),
     TaskTag {
@@ -181,7 +182,7 @@ impl Change {
             TaskStatus(s) => json!(s.as_str()),
             TaskPriority(p) => json!(p),
             TaskDue(d) => match d {
-                Some(d) => json!(d.to_string()),
+                Some(d) => json!(d.wire()),
                 None => Value::Null,
             },
             TaskParent(p) => match p {
@@ -308,7 +309,11 @@ mod tests {
                 tag: "work".into(),
                 on: true,
             },
-            Change::TaskDue(Some(jiff::civil::date(2026, 12, 1))),
+            Change::TaskDue(Some(crate::due::Due::day(jiff::civil::date(2026, 12, 1)))),
+            Change::TaskDue(Some(crate::due::Due::at(
+                jiff::civil::date(2026, 12, 1),
+                jiff::civil::time(14, 30, 5, 0),
+            ))),
             Change::TaskDue(None),
             Change::TabMove(crate::model::RemoteMove {
                 id: Uuid::now_v7(),

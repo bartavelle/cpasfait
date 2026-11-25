@@ -46,10 +46,10 @@ pub fn due_bonus(due: Date, today: Date) -> i64 {
 pub const PRIORITY_MIN: i64 = -3;
 pub const PRIORITY_MAX: i64 = 3;
 
-pub fn own_score(priority: i64, due: Option<Date>, today: Date) -> Score {
+pub fn own_score(priority: i64, due: Option<crate::due::Due>, today: Date) -> Score {
     Score {
         priority: (priority.max(PRIORITY_MIN) - PRIORITY_MIN) * PRIORITY_WEIGHT,
-        due: due.map(|d| due_bonus(d, today)).unwrap_or(0),
+        due: due.map(|d| due_bonus(d.date, today)).unwrap_or(0),
         blocking: 0,
     }
 }
@@ -71,7 +71,7 @@ mod tests {
         assert!(b(date(2099, 1, 1)) >= DUE_BASE);
         // never a full priority step
         assert!(b(date(2026, 11, 20)) < PRIORITY_WEIGHT);
-        let s = own_score(2, Some(date(2026, 11, 27)), today);
+        let s = own_score(2, Some(crate::due::Due::day(date(2026, 11, 27))), today);
         assert_eq!((s.priority, s.due, s.total()), (500, 50, 550));
         // never negative
         assert_eq!(own_score(PRIORITY_MIN, None, today).total(), 0);

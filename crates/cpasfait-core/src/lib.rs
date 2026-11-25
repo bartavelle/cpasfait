@@ -8,10 +8,12 @@ pub mod backend;
 pub mod config;
 pub mod crypto;
 pub mod dates;
+pub mod due;
 pub mod error;
 pub mod hlc;
 pub mod ids;
 pub mod model;
+pub mod notify;
 pub mod op;
 pub mod paths;
 pub mod position;
@@ -23,6 +25,7 @@ pub mod sync;
 pub mod taskfile;
 pub mod tree;
 
+pub use due::Due;
 pub use error::{Error, Result};
 pub use ids::{DeviceId, SessionId, TabId, TaskId};
 pub use model::{
@@ -30,5 +33,5 @@ pub use model::{
     TAB_SETTINGS, TabInfo, TabSettings, Task,
 };
 pub use op::{Change, Op, Status};
-pub use repo::{Moved, Place, Repo};
+pub use repo::{DueNotice, Moved, Place, Repo};
 pub use tree::{Row, Tree};

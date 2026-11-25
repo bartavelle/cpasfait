@@ -27,6 +27,8 @@ directory; its config.toml is used instead of the default one), CPASFAIT_USER
 (display name for new databases), EDITOR (editor for notes and E).";
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
+/// How often to look for tasks falling due.
+const DUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 fn main() -> Result<()> {
     let mut db = cpasfait_core::paths::default_db_path();
@@ -54,6 +56,7 @@ fn main() -> Result<()> {
         repo.set_email(config.email.as_deref())?;
     }
     let mut app = App::new(repo)?;
+    app.notify = config.notifications != Some(false);
     let worker = sync.then(|| SyncWorker::spawn(db.clone(), SYNC_INTERVAL));
 
     let mut terminal = ratatui::init();
@@ -73,6 +76,8 @@ fn main() -> Result<()> {
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker>) -> Result<()> {
     let mut last_edit_sync: Option<Instant> = None;
+    let mut last_due_check: Option<Instant> = None;
+    let mut notify_failed = false;
     // Number of explicit sync requests whose result should be reported.
     let mut explicit_syncs = 0usize;
     loop {
@@ -140,6 +145,23 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
                     app.info(format!("received {} changes", r.pulled));
                 }
                 explicit_syncs = explicit_syncs.saturating_sub(1);
+            }
+        }
+        if last_due_check.is_none_or(|t| t.elapsed() >= DUE_CHECK_INTERVAL) {
+            last_due_check = Some(Instant::now());
+            match app.due_notifications() {
+                Ok(notes) => {
+                    for n in notes {
+                        if let Err(e) = cpasfait_core::notify::send(&n) {
+                            // say it once, not every few seconds
+                            if !notify_failed {
+                                app.error(format!("{e} (notifications = false in the config turns them off)"));
+                            }
+                            notify_failed = true;
+                        }
+                    }
+                }
+                Err(e) => app.error(format!("{e:#}")),
             }
         }
         if let Err(e) = app.refresh_if_changed() {

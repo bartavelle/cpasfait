@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -160,6 +160,13 @@ ALTER TABLE task ADD COLUMN author_email TEXT;
 ALTER TABLE device ADD COLUMN email TEXT;
 ";
 
+/// Due dates already announced by a desktop notification (local, not
+/// synced): `due` is the task's due date at the time, so a new one is
+/// announced again.
+const SCHEMA_V8: &str = "
+CREATE TABLE due_notified(task TEXT PRIMARY KEY, due TEXT NOT NULL) WITHOUT ROWID;
+";
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -188,6 +195,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 7 {
         tx.execute_batch(SCHEMA_V7)?;
+    }
+    if version < 8 {
+        tx.execute_batch(SCHEMA_V8)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

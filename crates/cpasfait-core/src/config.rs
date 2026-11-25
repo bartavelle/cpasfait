@@ -15,6 +15,8 @@ pub struct Config {
     /// `~/` is the home directory; a relative path is relative to the
     /// configuration file's directory. See [`crate::paths::identity_path`].
     pub identity: Option<PathBuf>,
+    /// Desktop notifications when tasks fall due, from the TUI (default: on).
+    pub notifications: Option<bool>,
     /// Where the file was read from (resolves relative paths).
     #[serde(skip)]
     pub path: Option<PathBuf>,
@@ -77,7 +79,11 @@ impl Config {
              # Secret key for shared tabs: an age identity file or an SSH private key\n\
              # without passphrase (default: identity.txt in the data directory, else\n\
              # ~/.config/age/keys.txt, else a new key is created in the data directory).\n\
-             # identity = \"~/.ssh/id_ed25519\"\n",
+             # identity = \"~/.ssh/id_ed25519\"\n\
+             \n\
+             # Desktop notification (notify-send) when a task falls due, while the\n\
+             # TUI runs (cpasfait-notify --watch does it without the TUI).\n\
+             # notifications = false\n",
             toml::Value::String(email.to_owned())
         )
     }
@@ -101,6 +107,7 @@ mod tests {
         assert_eq!((c.name, c.identity), (None, None));
         assert_eq!(Config::parse("").unwrap(), Config::default());
         assert!(Config::parse("emial = \"x@y\"").is_err());
+        assert_eq!(Config::parse("notifications = false").unwrap().notifications, Some(false));
         assert!(Config::parse("email = \"nope\"").is_err());
         let c = Config::parse("name = \"Alice\"\nemail = \"a@b.c\"").unwrap();
         assert_eq!(c.name.as_deref(), Some("Alice"));

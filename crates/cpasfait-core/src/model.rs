@@ -172,7 +172,7 @@ pub struct Task {
     pub notes: String,
     pub status: Status,
     pub priority: i64,
-    pub due: Option<jiff::civil::Date>,
+    pub due: Option<crate::due::Due>,
     pub parent: Option<TaskId>,
     pub position: String,
     pub deleted: bool,

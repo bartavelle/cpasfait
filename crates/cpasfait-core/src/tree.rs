@@ -540,9 +540,9 @@ mod tests {
         tp.priority = 5; // parent with open children: not a candidate
         let tc1 = task(c1, Some(p), "1");
         let mut tc2 = task(c2, Some(p), "2");
-        tc2.due = Some(jiff::civil::date(2026, 1, 1));
+        tc2.due = Some(crate::due::Due::day(jiff::civil::date(2026, 1, 1)));
         let mut to = task(other, None, "2");
-        to.due = Some(jiff::civil::date(2027, 1, 1));
+        to.due = Some(crate::due::Due::day(jiff::civil::date(2027, 1, 1)));
         let t = Tree::build(vec![tp.clone(), tc1.clone(), tc2.clone(), to.clone()]);
         // same priority: earliest due wins over no due
         assert_eq!(t.next_task(), Some(c2));
@@ -611,7 +611,7 @@ mod tests {
         a.priority = 9;
         b.priority = 1;
         d.priority = 1;
-        d.due = Some(jiff::civil::date(2026, 12, 1));
+        d.due = Some(crate::due::Due::day(jiff::civil::date(2026, 12, 1)));
         k2.priority = 2;
         let mut t = Tree::build(vec![a, b, c, d, parent, k1, k2]);
         t.set_today(jiff::civil::date(2026, 11, 20));
@@ -633,7 +633,7 @@ mod tests {
         let mk = |i: usize, prio: i64, due: Option<jiff::civil::Date>| {
             let mut t = task(ids[i], None, &i.to_string());
             t.priority = prio;
-            t.due = due;
+            t.due = due.map(crate::due::Due::day);
             t
         };
         let build = |tasks: Vec<Task>| {

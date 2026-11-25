@@ -126,7 +126,7 @@ fn work_toggle_and_commands() {
 
     press(&mut app, ":due 2030-01-02<enter>:tag +work urgent<enter>:prio 2<enter>");
     let t = app.repo.task(app.selected().unwrap()).unwrap();
-    assert_eq!(t.due, Some(jiff::civil::date(2030, 1, 2)));
+    assert_eq!(t.due, Some(cpasfait_core::Due::day(jiff::civil::date(2030, 1, 2))));
     assert_eq!(t.tags, vec!["urgent", "work"]);
     assert_eq!(t.priority, 2);
     press(&mut app, ":tag -urgent<enter>");
@@ -850,4 +850,41 @@ fn move_task_to_another_tab() {
     // still working on it
     let active = app.active.clone().unwrap();
     assert_eq!(active.task, Some(app.rows[0].id));
+}
+
+#[test]
+fn due_times_and_notifications() {
+    let (mut app, time) = app();
+    app.tz = jiff::tz::TimeZone::system(); // repo.today() uses the system zone
+    let at = |h: i8, m: i8| {
+        jiff::civil::date(2026, 11, 25)
+            .at(h, m, 0, 0)
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
+            .unwrap()
+            .timestamp()
+            .as_millisecond()
+    };
+    time.store(at(9, 0), Ordering::SeqCst);
+    press(&mut app, "nCall Bob<enter>:due 14:30<enter>");
+    let t = app.selected().unwrap();
+    let due = app.repo.task(t).unwrap().due.unwrap();
+    assert_eq!(due.to_string(), "2026-11-25 14:30", "a time alone is today");
+    press(&mut app, ":due tom 9:15:30<enter>");
+    assert_eq!(app.repo.task(t).unwrap().due.unwrap().to_string(), "2026-11-26 09:15:30");
+    press(&mut app, ":due 25:00<enter>");
+    assert!(message(&app).starts_with("can't parse due date"), "{}", message(&app));
+    press(&mut app, ":due 14:30<enter>");
+    let s = screen(&mut app, 90, 8);
+    assert!(s.contains("Call Bob  ⌛ 2026-11-25 14:30"), "{s}");
+
+    // notifications: off by default (tests), once per due date
+    time.store(at(14, 30), Ordering::SeqCst);
+    assert!(app.due_notifications().unwrap().is_empty());
+    app.notify = true;
+    let n = app.due_notifications().unwrap();
+    assert_eq!(n.len(), 1);
+    assert_eq!(n[0].summary, "Due: Call Bob");
+    assert_eq!(n[0].body, "2026-11-25 14:30 · inbox");
+    assert_eq!(message(&app), "due: \"Call Bob\" (2026-11-25 14:30)");
+    assert!(app.due_notifications().unwrap().is_empty());
 }

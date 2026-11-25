@@ -10,7 +10,7 @@ and devices.
 |---|---|
 | `cpasfait-core` | model, op log, SQLite storage, sync. No UI. Meant to be shared with a future mobile app (UniFFI). |
 | `cpasfait-tui` | the `cpasfait` terminal UI |
-| `cpasfait-tools` | `cpasfait-next`, `cpasfait-report`, `cpasfait-key` and `cpasfait-gdrive` |
+| `cpasfait-tools` | `cpasfait-next`, `cpasfait-report`, `cpasfait-notify`, `cpasfait-key` and `cpasfait-gdrive` |
 
 See `docs/architecture.md` for the design and `docs/format.md` for the data and sync format.
 
@@ -63,6 +63,8 @@ Press `?` in the TUI for all keys. The essentials:
 - The details pane (`D`) shows the task's total time, today's and this week's, and its 8 latest sessions
 - `T` shows time spent per task, in all tabs (other tabs' tasks are marked `[tab]`; deleted tasks and their subtasks are left out), in a box at the lower right, cycling through hidden, today, this week and this month
 - `:due fri`, `:tag +home -work`, `:tabnew Work`, `gt`/`gT` switch tabs
+- Due dates can have a time: `:due 17:30` (today), `:due fri 9:00`, `:due tom 8:15:30`, `:due 2026-12-01 14:30`; `:due none` removes it. Times are local: in a tab shared across time zones, everyone sees the same clock time
+- When a task falls due (at its time, or at midnight for a date alone) the TUI shows a desktop notification that stays until dismissed (`notify-send`, critical urgency), once per due date; more than 3 at once (e.g. after a while away) make a single one. Done and deleted tasks are skipped. `notifications = false` in the configuration turns them off. Without the TUI running, `cpasfait-notify --watch` does the same (see below)
 - `:tabset` shows the tab's settings, `:tabset default_priority 2` changes one, `:tabunset default_priority` resets it. Settings are shared with the tab's members. For now there is one: `default_priority`, the priority of new tasks in the tab (-3 to 3, default 0)
 - `:moveto TAB` (or `:mv`) moves the task, with its subtasks, metadata and work log, to the end of another tab. Tasks belong to their tab's op log (and its encryption key and members), so the move copies them there under new ids and deletes the originals; their sessions move with them (time is counted once, a running session keeps running), and tasks that required them follow the copies. Members of the old tab who are not in the new one no longer see the task. It is refused while someone else is working on one of the tasks
 - `:require` / `:block` pick, in the finder, a task (any tab) this one needs or holds up (`:unrequire`, `:unblock` undo it); blocked tasks show `⊘blocked` and are never the next task
@@ -212,6 +214,28 @@ Within each level of the tree, tasks are listed by decreasing score (earlier due
 not done, without open subtasks, not blocked by an unfinished requirement,
 highest score first, then earliest due date, then tree order. Exit status is 2 when there is nothing to do. It opens
 the database read-only and takes a few milliseconds, so it suits status bars.
+
+`cpasfait-notify [--watch] [--interval SECS] [--print]` announces the tasks
+that have fallen due, like the TUI does; the two share the record of what was
+announced, so running both is fine. As a systemd user service,
+`~/.config/systemd/user/cpasfait-notify.service`:
+
+```ini
+[Unit]
+Description=cpasfait due-date notifications
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.cargo/bin/cpasfait-notify --watch
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
+```
+
+then `systemctl --user enable --now cpasfait-notify`. It reads the local
+database only: due dates set on other devices arrive when the TUI syncs.
 
 `cpasfait-report [PERIOD | --from D --to D] [--by …] [--me | --user U] [--tab T] [--json]`
 shows where the time went, across all tabs (or one with `--tab`):

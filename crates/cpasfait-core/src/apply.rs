@@ -117,7 +117,7 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
         TaskNotes(s) => set!(ensure_task, "task", "notes", s),
         TaskStatus(s) => set!(ensure_task, "task", "status", s.as_str()),
         TaskPriority(p) => set!(ensure_task, "task", "priority", p),
-        TaskDue(d) => set!(ensure_task, "task", "due", d.map(|d| d.to_string())),
+        TaskDue(d) => set!(ensure_task, "task", "due", d.map(|d| d.wire())),
         TaskParent(p) => set!(ensure_task, "task", "parent", p.map(|p| p.to_string())),
         TaskPosition(s) => set!(ensure_task, "task", "position", s),
         TaskDeleted(b) => set!(ensure_task, "task", "deleted", b),
