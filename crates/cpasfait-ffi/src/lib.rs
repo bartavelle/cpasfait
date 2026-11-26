@@ -349,7 +349,11 @@ fn dep_view(d: &cpasfait_core::DepInfo, own_tab: TabId) -> DepView {
     DepView {
         task: d.task.to_string(),
         title: d.title.clone(),
-        tab_name: if d.tab == Some(own_tab) { None } else { d.tab_name.clone() },
+        tab_name: if d.tab == Some(own_tab) {
+            None
+        } else {
+            d.tab_name.clone()
+        },
         state: match d.state {
             DepState::Todo => DepStateView::Todo,
             DepState::Done => DepStateView::Done,
