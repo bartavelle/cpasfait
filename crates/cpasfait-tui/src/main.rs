@@ -66,12 +66,44 @@ fn main() -> Result<()> {
 
     // Last push so other devices see our latest changes.
     if sync {
-        let report = sync_worker::run_once(&mut app.repo);
-        for e in report.errors {
-            eprintln!("sync error: {e}");
-        }
+        final_sync(&mut app.repo);
     }
     Ok(())
+}
+
+/// Sync every shared tab before exiting, saying what is going on (this can
+/// take a few seconds with a remote that is far away).
+fn final_sync(repo: &mut Repo) {
+    use std::io::Write;
+    let tabs: Vec<_> = match repo.tabs() {
+        Ok(tabs) => tabs.into_iter().filter(|t| t.remote.is_some()).collect(),
+        Err(e) => return eprintln!("sync error: {e}"),
+    };
+    if tabs.is_empty() {
+        return;
+    }
+    let me = match cpasfait_core::crypto::Identity::load_default() {
+        Ok(Some(me)) => me,
+        Ok(None) => return eprintln!("not syncing: no identity (secret key) found"),
+        Err(e) => return eprintln!("sync error: {e}"),
+    };
+    let (start, several) = (Instant::now(), tabs.len() > 1);
+    for tab in tabs {
+        let remote = tab.remote.as_ref().expect("filtered");
+        eprint!("syncing \"{}\" with {remote}… ", tab.name);
+        let _ = std::io::stderr().flush();
+        let t = Instant::now();
+        let res = cpasfait_core::backend::open(remote)
+            .and_then(|b| cpasfait_core::sync::sync_tab(repo, tab.id, b.as_ref(), &me));
+        let took = t.elapsed().as_secs_f64();
+        match res {
+            Ok(s) => eprintln!("sent {}, received {} ({took:.1}s)", s.pushed, s.pulled),
+            Err(e) => eprintln!("failed ({took:.1}s): {e}"),
+        }
+    }
+    if several {
+        eprintln!("done in {:.1}s", start.elapsed().as_secs_f64());
+    }
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker>) -> Result<()> {
