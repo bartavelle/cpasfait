@@ -65,6 +65,12 @@ pub fn run_once(repo: &mut Repo) -> SyncReport {
         waiting_for_key: 0,
         errors: vec![],
     };
+    let names: std::collections::HashMap<_, _> = repo
+        .tabs()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| (t.id, t.name))
+        .collect();
     match sync_all(repo) {
         Ok(results) => {
             for (tab, r) in results {
@@ -74,7 +80,10 @@ pub fn run_once(repo: &mut Repo) -> SyncReport {
                         report.pushed += s.pushed;
                         report.waiting_for_key += s.waiting_for_key;
                     }
-                    Err(e) => report.errors.push(format!("tab {tab}: {e}")),
+                    Err(e) => {
+                        let name = names.get(&tab).map_or_else(|| tab.to_string(), |n| format!("{n:?}"));
+                        report.errors.push(format!("tab {name}: {e:#}"));
+                    }
                 }
             }
         }

@@ -129,6 +129,7 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
     let mut notify_failed = false;
     // Number of explicit sync requests whose result should be reported.
     let mut explicit_syncs = 0usize;
+    let mut last_sync_error: Option<String> = None;
     loop {
         terminal.draw(|f| ui::render(f, app))?;
         if app.quit {
@@ -186,14 +187,23 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
         }
         if let Some(w) = worker {
             while let Ok(r) = w.results.try_recv() {
+                if r.errors.is_empty() {
+                    last_sync_error = None;
+                }
                 app.sync_status = Some(if r.errors.is_empty() {
                     let now = jiff::ZonedDateTime::now().strftime("%H:%M").to_string();
                     format!("synced {now}")
                 } else {
                     "sync failed".into()
                 });
-                if let Some(e) = r.errors.first() {
-                    app.error(format!("sync: {e}"));
+                if !r.errors.is_empty() {
+                    // A popup, as the message line truncates; but not again
+                    // and again for the same error at every periodic sync.
+                    let text = r.errors.join("\n");
+                    if explicit_syncs > 0 || last_sync_error.as_ref() != Some(&text) {
+                        app.alert("Sync failed", text.clone());
+                    }
+                    last_sync_error = Some(text);
                 } else if r.waiting_for_key > 0 {
                     app.info("some changes use a key you don't have yet (not invited back, or keys not synced yet)");
                 } else if explicit_syncs > 0 {

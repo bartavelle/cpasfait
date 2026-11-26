@@ -46,6 +46,13 @@ pub struct Message {
     pub error: bool,
 }
 
+/// An error too important or too long for the message line: a popup that
+/// any key closes.
+pub struct Alert {
+    pub title: String,
+    pub text: String,
+}
+
 /// `E` shows the sessions of the last this many days.
 pub const EDIT_DAYS: i64 = 30;
 
@@ -81,6 +88,7 @@ pub struct App {
     pub mode: Mode,
     pub pending: String,
     pub message: Option<Message>,
+    pub alert: Option<Alert>,
     /// This device's running session.
     pub active: Option<Session>,
     /// Running sessions of all users in the current tab.
@@ -131,6 +139,7 @@ impl App {
             mode: Mode::Normal,
             pending: String::new(),
             message: None,
+            alert: None,
             active: None,
             open_sessions: vec![],
             detail_sessions: vec![],
@@ -187,7 +196,7 @@ impl App {
                  deleted once they have",
                 config.spec()
             )),
-            Err(e) => self.error(format!("moving the tab: {e:#}")),
+            Err(e) => self.alert("Moving the tab failed", format!("{e:#}")),
         }
     }
 
@@ -222,10 +231,11 @@ impl App {
                 if r.warnings.is_empty() {
                     self.info(msg);
                 } else {
-                    self.error(format!("{msg}; {}", r.warnings.join("; ")));
+                    self.info(msg.clone());
+                    self.alert(msg, r.warnings.join("\n"));
                 }
             }
-            Err(e) => self.error(format!("{e:#}")),
+            Err(e) => self.alert("Switching remotes failed", format!("{e:#}")),
         }
     }
 
@@ -272,6 +282,14 @@ impl App {
         self.message = Some(Message {
             text: s.into(),
             error: false,
+        });
+    }
+
+    /// Show `text` in a popup (closed by any key).
+    pub fn alert(&mut self, title: impl Into<String>, text: impl Into<String>) {
+        self.alert = Some(Alert {
+            title: title.into(),
+            text: text.into(),
         });
     }
 
@@ -370,6 +388,9 @@ impl App {
     }
 
     fn on_key_inner(&mut self, key: KeyEvent) -> Result<()> {
+        if self.alert.take().is_some() {
+            return Ok(());
+        }
         match &mut self.mode {
             Mode::Help { scroll, page } => {
                 let half = (*page / 2).max(1);

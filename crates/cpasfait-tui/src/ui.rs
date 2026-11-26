@@ -41,6 +41,81 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Mode::Help { scroll, page } = &mut app.mode {
         render_help(f, scroll, page);
     }
+    if let Some(a) = &app.alert {
+        render_alert(f, a);
+    }
+}
+
+/// Greedy word wrap of `text` to `width` columns (long words are cut).
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut out = vec![];
+    for para in text.lines() {
+        let mut line = String::new();
+        for word in para.split_whitespace() {
+            let mut word = word.to_owned();
+            loop {
+                let sep = usize::from(!line.is_empty());
+                if line.width() + sep + word.width() <= width {
+                    if sep == 1 {
+                        line.push(' ');
+                    }
+                    line.push_str(&word);
+                    break;
+                }
+                if !line.is_empty() {
+                    out.push(std::mem::take(&mut line));
+                    continue;
+                }
+                // A word longer than a line: cut it.
+                let mut cut = 0;
+                let mut w = 0;
+                for (i, c) in word.char_indices() {
+                    let cw = c.width().unwrap_or(0);
+                    if w + cw > width {
+                        break;
+                    }
+                    w += cw;
+                    cut = i + c.len_utf8();
+                }
+                out.push(word[..cut].to_owned());
+                word = word[cut..].to_owned();
+                if word.is_empty() {
+                    break;
+                }
+            }
+        }
+        out.push(line);
+    }
+    out
+}
+
+/// An error popup (see [`crate::app::Alert`]), sized to show all of it.
+fn render_alert(f: &mut Frame, alert: &crate::app::Alert) {
+    let full = f.area();
+    let width = full.width.saturating_sub(4).min(80);
+    if width < 10 || full.height < 4 {
+        return;
+    }
+    let lines = wrap(&alert.text, width as usize - 4);
+    let height = (lines.len() as u16 + 4).min(full.height);
+    let area = Rect {
+        x: (full.width - width) / 2,
+        y: (full.height - height) / 2,
+        width,
+        height,
+    };
+    let block = Block::bordered()
+        .title(format!(" {} ", alert.title).bold())
+        .title_bottom(Line::from(" any key to close ").right_aligned())
+        .border_style(Style::new().fg(Color::Red));
+    let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 1));
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+    f.render_widget(
+        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()),
+        inner,
+    );
 }
 
 fn render_tabs(f: &mut Frame, app: &App, area: Rect) {

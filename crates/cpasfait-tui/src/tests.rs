@@ -942,3 +942,27 @@ fn due_times_and_notifications() {
     assert_eq!(message(&app), "due: \"Call Bob\" (2026-11-25 14:30)");
     assert!(app.due_notifications().unwrap().is_empty());
 }
+
+#[test]
+fn alert_popup_shows_everything_and_any_key_closes_it() {
+    let (mut app, _) = app();
+    press(&mut app, "none<esc>");
+    let long = "tab \"work\": rsync: ssh: connect to host example.invalid port 22: Name or service not known; \
+                rsync error: unexplained error (code 255) at io.c(232) [Receiver=3.2.7] THE-END";
+    app.alert("Sync failed", long);
+    let s = screen(&mut app, 60, 20);
+    assert!(s.contains("Sync failed"), "{s}");
+    assert!(s.contains("THE-END"), "{s}");
+    assert!(s.contains("any key to close"), "{s}");
+    // The key closes the popup and does nothing else.
+    press(&mut app, "dd");
+    assert!(app.alert.is_none());
+    assert_eq!(titles(&app), vec!["one"]);
+    assert!(!screen(&mut app, 60, 20).contains("Sync failed"));
+}
+
+#[test]
+fn wrap_cuts_long_words() {
+    let w = crate::ui::wrap("aaa bbbbbbbbbb c\nd", 4);
+    assert_eq!(w, vec!["aaa", "bbbb", "bbbb", "bb c", "d"]);
+}
