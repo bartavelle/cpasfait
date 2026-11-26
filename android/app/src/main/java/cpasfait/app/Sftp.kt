@@ -3,7 +3,7 @@ package cpasfait.app
 import cpasfait.core.Remote
 import cpasfait.core.RemoteException
 import cpasfait.core.RemoteProvider
-import net.schmizz.sshj.AndroidConfig
+import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.common.KeyType
 import net.schmizz.sshj.sftp.OpenMode
@@ -98,7 +98,8 @@ class SftpRemote(private val target: SshTarget, private val keys: SshKeys) : Rem
     private fun client(): SFTPClient {
         sftp?.let { return it }
         keys.public() // make sure there is a key
-        val c = SSHClient(AndroidConfig())
+        // Not AndroidConfig: it lacks ECDSA host keys and rsa-sha2; the full Bouncy Castle is installed.
+        val c = SSHClient(DefaultConfig())
         c.addHostKeyVerifier(TofuKnownHosts(keys.knownHosts))
         c.connectTimeout = 20_000
         c.timeout = 60_000

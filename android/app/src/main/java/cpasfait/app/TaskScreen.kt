@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cpasfait.core.DepStateView
@@ -71,6 +72,7 @@ fun TaskScreen(model: Model, id: String) {
     var due by remember(id, detail.due) { mutableStateOf(detail.due ?: "") }
     var tags by remember(id, detail.tags) { mutableStateOf(detail.tags.joinToString(" ")) }
     var addingSub by remember { mutableStateOf(false) }
+    val focus = LocalFocusManager.current
 
     fun save() {
         if (title.isNotBlank() && title.trim() != detail.title) model.act { model.core.setTitle(id, title.trim()) }
@@ -130,7 +132,10 @@ fun TaskScreen(model: Model, id: String) {
                     placeholder = { Text("fri 9:00, 17:30, 2026-12-01") },
                     singleLine = true,
                 )
-                TextButton(onClick = { model.act { model.core.setDue(id, due.ifBlank { null }) } }) { Text("Set") }
+                TextButton(onClick = {
+                    focus.clearFocus()
+                    model.act { model.core.setDue(id, due.ifBlank { null }) }
+                }) { Text("Set") }
                 if (detail.due != null) {
                     TextButton(onClick = { model.act { model.core.setDue(id, null) } }) { Text("Clear") }
                 }
@@ -141,6 +146,7 @@ fun TaskScreen(model: Model, id: String) {
                     tags, { tags = it }, Modifier.weight(1f), label = { Text("Tags") }, singleLine = true,
                 )
                 TextButton(onClick = {
+                    focus.clearFocus()
                     val want = tags.split(' ', ',').map { it.trim().removePrefix("#") }.filter { it.isNotEmpty() }.toSet()
                     model.act {
                         for (t in detail.tags) if (t !in want) model.core.setTag(id, t, false)

@@ -86,6 +86,7 @@ fun TasksScreen(model: Model) {
     var adding by remember { mutableStateOf<String?>(null) }
     var newTab by remember { mutableStateOf(false) }
     MessageSnackbar(model, snackbar)
+    if (model.askName) WelcomeDialog(model)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -126,7 +127,7 @@ fun TasksScreen(model: Model) {
                     Text("Nothing to do!", style = MaterialTheme.typography.bodyLarge)
                 }
             }
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 88.dp)) {
                 items(rows, key = { it.id }) { r ->
                     TaskRow(model, r)
                     HorizontalDivider(Modifier.alpha(0.3f))
@@ -327,5 +328,32 @@ fun TextDialog(
             TextButton(onClick = { if (text.isNotBlank()) onOk(text.trim()) }) { Text(confirm) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** First start: who you are (on work sessions, and as the author of tasks). */
+@Composable
+private fun WelcomeDialog(model: Model) {
+    var name by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Welcome to cpasfait") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Your name is shown on your work sessions, your email as the author of your tasks.")
+                OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(email, { email = it }, label = { Text("Email (optional)") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = name.isNotBlank(), onClick = {
+                model.act {
+                    model.core.setUser(name.trim())
+                    if (email.isNotBlank()) model.core.setEmail(email.trim())
+                }
+                model.askName = false
+            }) { Text("OK") }
+        },
     )
 }

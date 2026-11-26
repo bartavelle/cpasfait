@@ -29,6 +29,9 @@ android {
         compose = true
     }
 
+    // android.util.Log in the JVM tests: does nothing.
+    testOptions.unitTests.isReturnDefaultValues = true
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -82,6 +85,20 @@ val uniffiBindings by tasks.registering(Exec::class) {
 
 tasks.named("preBuild") { dependsOn(uniffiBindings) }
 
+// The JVM tests use the core built for this machine.
+val cargoHost by tasks.registering(Exec::class) {
+    description = "Builds libcpasfait_ffi.so for the JVM tests"
+    workingDir = workspace
+    environment("PATH", "${cargoBin.path}:${System.getenv("PATH")}")
+    commandLine("cargo", "build", "--release", "-p", "cpasfait-ffi")
+    outputs.upToDateWhen { false }
+}
+
+tasks.withType<Test>().configureEach {
+    dependsOn(cargoHost)
+    systemProperty("jna.library.path", File(workspace, "target/release").path)
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
@@ -100,4 +117,10 @@ dependencies {
     implementation("com.hierynomus:sshj:0.41.2")
     implementation("org.bouncycastle:bcprov-jdk18on:1.84")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.84")
+
+    // SFTP against an SSH server in the test.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("net.java.dev.jna:jna:5.19.1")
+    testImplementation("org.apache.sshd:sshd-core:2.20.1")
+    testImplementation("org.apache.sshd:sshd-sftp:2.20.1")
 }

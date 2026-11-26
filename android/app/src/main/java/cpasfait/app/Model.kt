@@ -21,6 +21,9 @@ sealed interface Screen {
     data object Settings : Screen
 }
 
+/** The name the core gives when there is no `$USER` (as on Android). */
+private const val DEFAULT_USER = "me"
+
 /** What the screens show (process-wide: survives rotations). */
 class Model(val app: CpasfaitApp) {
     val core get() = app.core
@@ -39,6 +42,8 @@ class Model(val app: CpasfaitApp) {
         private set
     var screen by mutableStateOf<Screen>(Screen.Tasks)
     var message by mutableStateOf<String?>(null)
+    /** No name set yet (first start). */
+    var askName by mutableStateOf(runCatching { app.core.user() == DEFAULT_USER }.getOrDefault(false))
     var syncing by mutableStateOf(false)
         private set
     var syncStatus by mutableStateOf<String?>(null)
