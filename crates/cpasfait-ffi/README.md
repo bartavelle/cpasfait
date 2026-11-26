@@ -2,7 +2,7 @@
 
 The core for the mobile apps: a `Cpasfait` object (one database connection)
 and plain records, exported to Kotlin with [UniFFI](https://mozilla.github.io/uniffi-rs).
-See `src/lib.rs` for the API.
+See `src/lib.rs` for the API, and `android/` for the app using it.
 
 ## Kotlin bindings
 

@@ -25,7 +25,9 @@ uniffi::setup_scaffolding!();
 
 // ------------------------------------------------------------------ errors
 
+/// Kotlin: `CpasfaitException.Failed` / `.NotInvited`, the message for the user.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum CpasfaitError {
     /// Anything else, with a message for the user.
     #[error("{message}")]
@@ -58,8 +60,8 @@ type Res<T> = Result<T, CpasfaitError>;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum RemoteError {
-    #[error("{message}")]
-    Failed { message: String },
+    #[error("{reason}")]
+    Failed { reason: String },
     /// `get` of a missing file.
     #[error("not found")]
     NotFound,
@@ -70,7 +72,7 @@ pub enum RemoteError {
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for RemoteError {
     fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        RemoteError::Failed { message: e.reason }
+        RemoteError::Failed { reason: e.reason }
     }
 }
 
@@ -100,7 +102,7 @@ fn remote_error(e: RemoteError, path: &str) -> cpasfait_core::Error {
     match e {
         RemoteError::NotFound => cpasfait_core::Error::NotFound(path.to_owned()),
         RemoteError::AlreadyExists => cpasfait_core::Error::AlreadyExists(path.to_owned()),
-        RemoteError::Failed { message } => cpasfait_core::Error::Backend(message),
+        RemoteError::Failed { reason } => cpasfait_core::Error::Backend(reason),
     }
 }
 

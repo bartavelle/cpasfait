@@ -17,18 +17,18 @@ impl Remote for DirRemote {
     fn list(&self, prefix: String) -> Result<Vec<String>, RemoteError> {
         self.0
             .list(&prefix)
-            .map_err(|e| RemoteError::Failed { message: e.to_string() })
+            .map_err(|e| RemoteError::Failed { reason: e.to_string() })
     }
     fn get(&self, path: String) -> Result<Vec<u8>, RemoteError> {
         self.0
             .get(&path)
-            .map_err(|e| RemoteError::Failed { message: e.to_string() })
+            .map_err(|e| RemoteError::Failed { reason: e.to_string() })
     }
     fn put_new(&self, path: String, data: Vec<u8>) -> Result<(), RemoteError> {
         match self.0.put_new(&path, &data) {
             Ok(()) => Ok(()),
             Err(cpasfait_core::Error::AlreadyExists(_)) => Err(RemoteError::AlreadyExists),
-            Err(e) => Err(RemoteError::Failed { message: e.to_string() }),
+            Err(e) => Err(RemoteError::Failed { reason: e.to_string() }),
         }
     }
 }
