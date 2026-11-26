@@ -154,7 +154,8 @@ Work log      s        start/stop working on the task   S      stop running work
               W        switch to this task at…          (times: 14:30, -20m, yesterday 18:00)
 View          H        hide/show done tasks             D      toggle detail pane
               T        time spent (all tabs): hidden → today → this week → month
-Commands      :due DATE [TIME]|TIME|none  (2026-12-01, tom, +3d, fri 9:00, 17:30)  :tag +a -b
+Commands      ↑/↓ history (starting with what is typed)   Tab/S-Tab complete
+              :due DATE [TIME]|TIME|none  (2026-12-01, tom, +3d, fri 9:00, 17:30)  :tag +a -b
               :prio N   :title TEXT   :worknote TEXT   :user NAME   :sync   :q
               :require  :block  :unrequire  :unblock  (pick the other task)
               :moveto TAB  move the task, its subtasks and work log to another tab

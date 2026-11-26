@@ -34,6 +34,9 @@ fn press(app: &mut App, keys: &str) {
                 "esc" => KeyCode::Esc,
                 "tab" => KeyCode::Tab,
                 "bs" => KeyCode::Backspace,
+                "up" => KeyCode::Up,
+                "down" => KeyCode::Down,
+                "stab" => KeyCode::BackTab,
                 _ => KeyCode::Char('<'),
             };
             if matches!(code, KeyCode::Char('<')) {
@@ -965,4 +968,82 @@ fn alert_popup_shows_everything_and_any_key_closes_it() {
 fn wrap_cuts_long_words() {
     let w = crate::ui::wrap("aaa bbbbbbbbbb c\nd", 4);
     assert_eq!(w, vec!["aaa", "bbbb", "bbbb", "bb c", "d"]);
+}
+
+fn cmdline(app: &App) -> String {
+    match &app.mode {
+        Mode::Command(e) => e.text().to_owned(),
+        Mode::Tags { editor, .. } => editor.text().to_owned(),
+        _ => panic!("not editing"),
+    }
+}
+
+#[test]
+fn command_history() {
+    let (mut app, _) = app();
+    press(&mut app, ":tabnew a<enter>:tabnew b<enter>:user bob<enter>");
+    press(&mut app, ":<up>");
+    assert_eq!(cmdline(&app), "user bob");
+    press(&mut app, "<up><up>");
+    assert_eq!(cmdline(&app), "tabnew a");
+    press(&mut app, "<up>");
+    assert_eq!(cmdline(&app), "tabnew a");
+    press(&mut app, "<down><down><down>");
+    assert_eq!(cmdline(&app), "");
+    // Only those starting with what was typed.
+    press(&mut app, "tab<up>");
+    assert_eq!(cmdline(&app), "tabnew b");
+    press(&mut app, "<down>");
+    assert_eq!(cmdline(&app), "tab");
+    press(&mut app, "<esc>");
+}
+
+#[test]
+fn tab_completion() {
+    let (mut app, _) = app();
+    press(
+        &mut app,
+        ":tabnew Work stuff<enter>:tabnew Home<enter>nx<esc>:tag +urgent +later<enter>",
+    );
+    // A unique command.
+    press(&mut app, ":tabrem<tab>");
+    assert_eq!(cmdline(&app), "tabremote ");
+    press(&mut app, "<esc>");
+    // Several: the common part, then cycle (S-Tab goes back).
+    press(&mut app, ":tabm<tab>");
+    assert_eq!(cmdline(&app), "tabm");
+    assert_eq!(app.completion.as_ref().unwrap().items, ["tabmembers", "tabmove"]);
+    let s = screen(&mut app, 80, 10);
+    assert!(s.contains("tabmembers") && s.contains("tabmove"), "{s}");
+    press(&mut app, "<tab>");
+    assert_eq!(cmdline(&app), "tabmembers");
+    press(&mut app, "<tab>");
+    assert_eq!(cmdline(&app), "tabmove");
+    press(&mut app, "<stab>");
+    assert_eq!(cmdline(&app), "tabmembers");
+    // Typing ends it.
+    press(&mut app, "x");
+    assert!(app.completion.is_none());
+    press(&mut app, "<esc>");
+    // Tags, after the sign.
+    press(&mut app, ":tag -u<tab>");
+    assert_eq!(cmdline(&app), "tag -urgent ");
+    press(&mut app, "<esc>");
+    // Tab names, spaces included, case ignored.
+    press(&mut app, ":moveto wo<tab>");
+    assert_eq!(cmdline(&app), "moveto Work stuff");
+    press(&mut app, "<esc>");
+    // In the tag editor too.
+    press(&mut app, "ny<esc>tl<tab>");
+    assert_eq!(cmdline(&app), "later ");
+    press(&mut app, "<tab>");
+    assert_eq!(cmdline(&app), "later urgent ");
+    press(&mut app, "<tab>");
+    assert_eq!(cmdline(&app), "later urgent ", "nothing left");
+    press(&mut app, "<esc>");
+    // Remotes typed before.
+    app.history.add("tabjoin rsync:me@host:dir 0190");
+    press(&mut app, ":tabremote rs<tab>");
+    assert_eq!(cmdline(&app), "tabremote rsync:me@host:dir");
+    press(&mut app, "<esc>");
 }

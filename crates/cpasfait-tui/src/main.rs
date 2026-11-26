@@ -1,4 +1,5 @@
 mod app;
+mod cmdline;
 mod config;
 mod editor;
 mod fuzzy;
@@ -57,6 +58,9 @@ fn main() -> Result<()> {
     }
     let mut app = App::new(repo)?;
     app.notify = config.notifications != Some(false);
+    // Next to the database, so a --db elsewhere (tests, experiments) has its own.
+    let history = db.with_file_name("command_history");
+    app.history = cmdline::History::load(history);
     let worker = sync.then(|| SyncWorker::spawn(db.clone(), SYNC_INTERVAL));
 
     let mut terminal = ratatui::init();

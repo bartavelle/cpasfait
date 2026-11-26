@@ -28,6 +28,20 @@ impl LineEditor {
         &self.text
     }
 
+    /// Cursor position as a byte index.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Replace the text, the cursor at `cursor` (clamped to the text).
+    pub fn set(&mut self, text: String, cursor: usize) {
+        self.cursor = cursor.min(text.len());
+        while !text.is_char_boundary(self.cursor) {
+            self.cursor -= 1;
+        }
+        self.text = text;
+    }
+
     /// Display width of the text before the cursor.
     pub fn cursor_col(&self) -> usize {
         self.text[..self.cursor].width()

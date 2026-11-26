@@ -89,6 +89,10 @@ pub struct App {
     pub pending: String,
     pub message: Option<Message>,
     pub alert: Option<Alert>,
+    /// Commands run before (Up/Down in the command line).
+    pub history: crate::cmdline::History,
+    /// Tab completion in progress (command line or tag editor).
+    pub completion: Option<crate::cmdline::Completion>,
     /// This device's running session.
     pub active: Option<Session>,
     /// Running sessions of all users in the current tab.
@@ -140,6 +144,8 @@ impl App {
             pending: String::new(),
             message: None,
             alert: None,
+            history: Default::default(),
+            completion: None,
             active: None,
             open_sessions: vec![],
             detail_sessions: vec![],
@@ -391,6 +397,13 @@ impl App {
         if self.alert.take().is_some() {
             return Ok(());
         }
+        if matches!(self.mode, Mode::Command(_) | Mode::Tags { .. }) {
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                self.complete(key.code == KeyCode::BackTab);
+                return Ok(());
+            }
+            self.completion = None;
+        }
         match &mut self.mode {
             Mode::Help { scroll, page } => {
                 let half = (*page / 2).max(1);
@@ -474,23 +487,38 @@ impl App {
                     }
                 }
             }
-            Mode::Command(editor) => match editor.handle(key) {
-                EditResult::Continue => {
-                    if editor.text().is_empty() && key.code == KeyCode::Backspace {
-                        self.mode = Mode::Normal;
+            Mode::Command(editor) => {
+                let browsed = match key.code {
+                    KeyCode::Up => Some(self.history.older(editor.text())),
+                    KeyCode::Down => Some(self.history.newer()),
+                    _ => None,
+                };
+                if let Some(line) = browsed {
+                    if let Some(line) = line {
+                        editor.set(line, usize::MAX);
                     }
-                    Ok(())
+                    return Ok(());
                 }
-                EditResult::Submit => {
-                    let cmd = editor.text().to_owned();
-                    self.mode = Mode::Normal;
-                    self.run_command(&cmd)
+                self.history.reset();
+                match editor.handle(key) {
+                    EditResult::Continue => {
+                        if editor.text().is_empty() && key.code == KeyCode::Backspace {
+                            self.mode = Mode::Normal;
+                        }
+                        Ok(())
+                    }
+                    EditResult::Submit => {
+                        let cmd = editor.text().to_owned();
+                        self.mode = Mode::Normal;
+                        self.history.add(&cmd);
+                        self.run_command(&cmd)
+                    }
+                    EditResult::Cancel => {
+                        self.mode = Mode::Normal;
+                        Ok(())
+                    }
                 }
-                EditResult::Cancel => {
-                    self.mode = Mode::Normal;
-                    Ok(())
-                }
-            },
+            }
             Mode::Normal => {
                 if key.code == KeyCode::Esc {
                     self.pending.clear();
@@ -588,6 +616,163 @@ impl App {
             task,
             editor: LineEditor::new(&text),
         };
+    }
+
+    /// Tab (`back`: Shift-Tab) in the command line or the tag editor:
+    /// complete the word before the cursor, or cycle through the choices.
+    fn complete(&mut self, back: bool) {
+        use crate::cmdline::{Completion, common_prefix, matching};
+        let (line, cursor) = match &self.mode {
+            Mode::Command(e) | Mode::Tags { editor: e, .. } => (e.text().to_owned(), e.cursor()),
+            _ => return,
+        };
+        let (new, cur) = match &mut self.completion {
+            Some(c) if c.line == line && !c.items.is_empty() => {
+                let n = c.items.len();
+                let i = match (c.selected, back) {
+                    (None, false) => 0,
+                    (None, true) => n - 1,
+                    (Some(i), false) => (i + 1) % n,
+                    (Some(i), true) => (i + n - 1) % n,
+                };
+                c.selected = Some(i);
+                let new = format!("{}{}{}", &line[..c.start], c.items[i], &line[cursor..]);
+                let cur = c.start + c.items[i].len();
+                c.line = new.clone();
+                (new, cur)
+            }
+            _ => {
+                let Some(cands) = self.candidates(&line[..cursor]) else {
+                    return;
+                };
+                let word = &line[cands.start..cursor];
+                let items = matching(word, cands.items);
+                let insert = match items.as_slice() {
+                    [] => return,
+                    [one] => format!("{one}{}", if cands.space { " " } else { "" }),
+                    _ => {
+                        let p = common_prefix(&items);
+                        if p.chars().count() > word.chars().count() {
+                            p
+                        } else {
+                            word.to_owned()
+                        }
+                    }
+                };
+                let new = format!("{}{insert}{}", &line[..cands.start], &line[cursor..]);
+                let cur = cands.start + insert.len();
+                self.completion = (items.len() > 1).then(|| Completion {
+                    start: cands.start,
+                    items,
+                    selected: None,
+                    line: new.clone(),
+                });
+                (new, cur)
+            }
+        };
+        if let Mode::Command(e) | Mode::Tags { editor: e, .. } = &mut self.mode {
+            e.set(new, cur);
+        }
+    }
+
+    /// What may complete `before` (the line up to the cursor).
+    fn candidates(&self, before: &str) -> Option<crate::cmdline::Candidates> {
+        use crate::cmdline::{COMMANDS, Candidates, word_start};
+        let word = word_start(before);
+        let tags = |start: usize| {
+            // `+tag`, `-tag`, `#tag`: complete after the sign.
+            let sign = before[start..].len() - before[start..].trim_start_matches(['+', '-', '#']).len();
+            // Not those already on the line.
+            let present: HashSet<&str> = before[..start]
+                .split_whitespace()
+                .map(|w| w.trim_start_matches(['+', '-', '#']))
+                .collect();
+            let mut items = self.repo.all_tags().unwrap_or_default();
+            items.retain(|t| !present.contains(t.as_str()));
+            Some(Candidates {
+                start: start + sign,
+                items,
+                space: true,
+            })
+        };
+        if let Mode::Tags { .. } = self.mode {
+            return tags(word);
+        }
+        let Some((cmd, _)) = before.split_once(char::is_whitespace) else {
+            return Some(Candidates {
+                start: 0,
+                items: COMMANDS.iter().map(|c| c.to_string()).collect(),
+                space: true,
+            });
+        };
+        // Where the argument starts; for commands taking one argument that
+        // may contain spaces (tab and member names), all of it is completed.
+        let arg = before.len() - before[cmd.len()..].trim_start().len();
+        let whole = |items: Vec<String>| {
+            Some(Candidates {
+                start: arg,
+                items,
+                space: false,
+            })
+        };
+        let tab = self.tab();
+        match cmd {
+            "tag" | "tags" => tags(word),
+            "moveto" | "mv" => whole(
+                self.tabs
+                    .iter()
+                    .filter(|t| Some(t.id) != tab.map(|c| c.id))
+                    .map(|t| t.name.clone())
+                    .collect(),
+            ),
+            "tabrevoke" => whole(
+                tab.and_then(|t| self.repo.members(t.id).ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|m| m.active)
+                    .map(|m| m.name)
+                    .collect(),
+            ),
+            "tabset" => whole(
+                cpasfait_core::TAB_SETTINGS
+                    .iter()
+                    .map(|s| format!("{}=", s.name))
+                    .collect(),
+            ),
+            "tabunset" => whole(cpasfait_core::TAB_SETTINGS.iter().map(|s| s.name.to_owned()).collect()),
+            "tabaccept" => whole(
+                tab.and_then(|t| t.pending_move.as_ref())
+                    .map(|m| m.remote.clone())
+                    .into_iter()
+                    .collect(),
+            ),
+            // Remotes: those of the tabs, and those typed before.
+            "tabremote" | "tabmove" | "tabjoin" if word == arg => {
+                let mut items: Vec<String> = self
+                    .tabs
+                    .iter()
+                    .filter_map(|t| t.remote.as_ref().map(|r| r.spec()))
+                    .collect();
+                for line in self.history.entries() {
+                    let mut w = line.split_whitespace();
+                    if matches!(w.next(), Some("tabremote" | "tabmove" | "tabjoin"))
+                        && let Some(r) = w.next()
+                        && r != "none"
+                    {
+                        items.push(r.to_owned());
+                    }
+                }
+                if cmd == "tabremote" {
+                    items.push("none".into());
+                }
+                Some(Candidates {
+                    start: arg,
+                    items,
+                    space: cmd == "tabjoin",
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Set the tags of `task` to the words of `text` (`#` prefixes allowed).

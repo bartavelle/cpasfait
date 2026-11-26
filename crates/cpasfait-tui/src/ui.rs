@@ -34,6 +34,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
         render_detail(f, app, d);
     }
     render_status(f, app, status);
+    if let (Some(c), Mode::Command(_) | Mode::Tags { .. }) = (&app.completion, &app.mode) {
+        render_choices(
+            f,
+            c,
+            Rect {
+                y: status.y.saturating_sub(1),
+                ..status
+            },
+        );
+    }
     render_time_box(f, app, body);
     if let Mode::Search(search) = &app.mode {
         render_search(f, search, body);
@@ -44,6 +54,42 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if let Some(a) = &app.alert {
         render_alert(f, a);
     }
+}
+
+/// The choices of a Tab completion, on one line (scrolled to the selected one).
+fn render_choices(f: &mut Frame, c: &crate::cmdline::Completion, area: Rect) {
+    let width = area.width as usize;
+    let sel = c.selected.unwrap_or(0);
+    // Start early enough that the selected item fits.
+    let mut first = 0;
+    while first < sel && c.items[first..=sel].iter().map(|i| i.width() + 2).sum::<usize>() + 2 > width {
+        first += 1;
+    }
+    let mut spans = vec![];
+    let mut used = 0;
+    if first > 0 {
+        spans.push(Span::raw("< ").dim());
+        used += 2;
+    }
+    for (i, item) in c.items.iter().enumerate().skip(first) {
+        let w = item.width() + 2;
+        if used + w + 2 > width && i > sel {
+            spans.push(Span::raw(">").dim());
+            break;
+        }
+        let style = if Some(i) == c.selected {
+            Style::new().bg(Color::Yellow).fg(Color::Black)
+        } else {
+            Style::new()
+        };
+        spans.push(Span::styled(format!(" {item} "), style));
+        used += w;
+    }
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::new().bg(Color::DarkGray)),
+        area,
+    );
 }
 
 /// Greedy word wrap of `text` to `width` columns (long words are cut).

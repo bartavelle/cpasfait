@@ -1420,6 +1420,16 @@ impl Repo {
 
     // ---------------------------------------------------------------- reads
 
+    /// Every tag in use on a live task, in any tab, sorted.
+    pub fn all_tags(&self) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare(
+            "SELECT DISTINCT tt.tag FROM task_tag tt JOIN task t ON t.id = tt.task JOIN tab ON tab.id = t.tab
+             WHERE t.deleted = 0 AND tab.deleted = 0 ORDER BY tt.tag",
+        )?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn tabs(&self) -> Result<Vec<TabInfo>> {
         let mut st = self.conn.prepare(
             "SELECT id, name, remote, move_id, move_remote, move_by, move_done
