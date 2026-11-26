@@ -401,7 +401,7 @@ fn moving_to_another_remote() {
     c.repo.add_known_tab(tab).unwrap();
     c.sync(tab, &old).unwrap();
 
-    let copied = move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id).unwrap();
+    let copied = move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id, &mut |_| {}).unwrap();
     assert!(copied >= 4, "{copied}");
     let tabs = a.repo.tabs().unwrap();
     assert_eq!(tabs[0].remote, Some(local(&p2)));
@@ -413,7 +413,7 @@ fn moving_to_another_remote() {
     let m = b.repo.tabs().unwrap()[0].pending_move.clone().unwrap();
     assert_eq!((m.by.as_str(), m.remote.as_str()), ("alice", p2.to_str().unwrap()));
     // He follows it as is; his late change comes along.
-    let r = accept_move(&mut b.repo, tab, Some(&old), &new, &local(&p2), &b.id).unwrap();
+    let r = accept_move(&mut b.repo, tab, Some(&old), &new, &local(&p2), &b.id, &mut |_| {}).unwrap();
     assert!(r.warnings.is_empty(), "{:?}", r.warnings);
     assert!(r.copied >= 1);
     assert_eq!(b.repo.tabs().unwrap()[0].remote, Some(local(&p2)));
@@ -424,7 +424,7 @@ fn moving_to_another_remote() {
     std::os::unix::fs::symlink(&p2, &link).unwrap();
     c.sync(tab, &old).unwrap();
     let elsewhere = LocalDir::new(&link);
-    accept_move(&mut c.repo, tab, Some(&old), &elsewhere, &local(&link), &c.id).unwrap();
+    accept_move(&mut c.repo, tab, Some(&old), &elsewhere, &local(&link), &c.id, &mut |_| {}).unwrap();
     c.repo.set_title(t, "after").unwrap();
     c.sync(tab, &elsewhere).unwrap();
 
@@ -443,16 +443,16 @@ fn following_a_move_to_a_wrong_path_is_refused() {
     let (p1, p2, typo) = (dir.path().join("one"), dir.path().join("two"), dir.path().join("tow"));
     let (old, new) = (LocalDir::new(&p1), LocalDir::new(&p2));
     let (mut a, mut b, tab) = pair(&old, &p1);
-    move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id).unwrap();
+    move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id, &mut |_| {}).unwrap();
     b.sync(tab, &old).unwrap();
     let wrong = LocalDir::new(&typo);
-    assert!(accept_move(&mut b.repo, tab, Some(&old), &wrong, &local(&typo), &b.id).is_err());
+    assert!(accept_move(&mut b.repo, tab, Some(&old), &wrong, &local(&typo), &b.id, &mut |_| {}).is_err());
     assert!(!typo.exists(), "nothing written there");
     let t = &b.repo.tabs().unwrap()[0];
     assert_eq!(t.remote, Some(local(&p1)));
     assert!(t.pending_move.is_some());
     // no move pending: nothing to accept
-    assert!(accept_move(&mut a.repo, tab, None, &new, &local(&p2), &a.id).is_err());
+    assert!(accept_move(&mut a.repo, tab, None, &new, &local(&p2), &a.id, &mut |_| {}).is_err());
 }
 
 #[test]
@@ -462,12 +462,12 @@ fn old_remote_lost_after_a_move() {
     let (p1, p2) = (dir.path().join("one"), dir.path().join("two"));
     let (old, new) = (LocalDir::new(&p1), LocalDir::new(&p2));
     let (mut a, mut b, tab) = pair(&old, &p1);
-    move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id).unwrap();
+    move_tab(&mut a.repo, tab, &old, &new, &local(&p2), &a.id, &mut |_| {}).unwrap();
     let late = b.repo.add_task(tab, Place::LastChildOf(None), "late").unwrap();
     b.sync(tab, &old).unwrap();
     std::fs::remove_dir_all(&p1).unwrap();
     // Bob's late ops never reached the new remote by copy: he uploads them again.
-    let r = accept_move(&mut b.repo, tab, Some(&old), &new, &local(&p2), &b.id).unwrap();
+    let r = accept_move(&mut b.repo, tab, Some(&old), &new, &local(&p2), &b.id, &mut |_| {}).unwrap();
     assert_eq!(r.copied, 0);
     a.sync(tab, &new).unwrap();
     assert_eq!(a.title(late).as_deref(), Some("late"));

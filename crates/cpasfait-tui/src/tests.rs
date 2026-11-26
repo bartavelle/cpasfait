@@ -50,6 +50,20 @@ fn press(app: &mut App, keys: &str) {
     }
 }
 
+/// Run the tab moves `app` asked for (main.rs does it with a progress popup),
+/// returning the progress steps.
+fn run_moves(app: &mut App) -> Vec<cpasfait_core::sync::MoveStep> {
+    let mut steps = vec![];
+    for req in std::mem::take(&mut app.requests) {
+        match req {
+            crate::app::Request::MoveTab(config) => app.move_tab(&config, &mut |s| steps.push(s)),
+            crate::app::Request::AcceptMove(config) => app.accept_move(&config, &mut |s| steps.push(s)),
+            other => app.requests.push(other),
+        }
+    }
+    steps
+}
+
 fn titles(app: &App) -> Vec<String> {
     app.rows
         .iter()
@@ -567,7 +581,24 @@ fn moving_a_tab_between_remotes() {
     press(&mut alice, &format!(":tabmove {}<enter>", one.display()));
     assert!(message(&alice).contains("already there"));
     press(&mut alice, &format!(":tabmove {}<enter>", two.display()));
+    let steps = run_moves(&mut alice);
     assert!(message(&alice).starts_with("moved to "), "{}", message(&alice));
+    {
+        use cpasfait_core::sync::MoveStep::*;
+        let n = steps.len();
+        assert_eq!(steps[..2], [SyncOld, Listing]);
+        assert_eq!(steps[2], Copying { done: 0, total: n - 4 });
+        assert_eq!(steps[n - 2..], [Copying { done: n - 4, total: n - 4 }, SyncNew]);
+        // What the popup looks like.
+        let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(50, 6)).unwrap();
+        t.draw(|f| {
+            crate::ui::render_progress(f, "Moving", Copying { done: 1, total: 4 }, std::time::Duration::from_secs(3))
+        })
+        .unwrap();
+        let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("copying files: 1/4…  3s"), "{text}");
+        assert!(text.contains("25%"), "{text}");
+    }
     assert!(two.join(tab.to_string()).join("keys").is_dir());
 
     // Bob hears about it from the old remote.
@@ -585,6 +616,7 @@ fn moving_a_tab_between_remotes() {
     let Mode::Command(e) = &bob.mode else { panic!() };
     assert_eq!(e.text(), format!("tabaccept {}", two.display()));
     press(&mut bob, "<enter>");
+    assert_eq!(run_moves(&mut bob).last(), Some(&cpasfait_core::sync::MoveStep::SyncNew));
     assert_eq!(message(&bob), format!("now using {}", two.display()));
     assert!(!screen(&mut bob, 80, 5).contains('↪'));
     assert_eq!(

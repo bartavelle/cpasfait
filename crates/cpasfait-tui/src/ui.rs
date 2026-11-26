@@ -680,3 +680,46 @@ fn render_help(f: &mut Frame, scroll: &mut u16, page: &mut u16) {
     f.render_widget(Clear, r);
     f.render_widget(Paragraph::new(HELP).scroll((*scroll, 0)).block(block), r);
 }
+
+/// The popup shown during a long operation (moving a tab): what it is doing,
+/// and a gauge while copying files.
+pub fn render_progress(f: &mut Frame, title: &str, step: cpasfait_core::sync::MoveStep, elapsed: std::time::Duration) {
+    use cpasfait_core::sync::MoveStep;
+    use ratatui::widgets::Gauge;
+    let full = f.area();
+    let width = full.width.saturating_sub(4).min(70);
+    let height = 4.min(full.height);
+    if width < 20 || height < 4 {
+        return;
+    }
+    let area = Rect {
+        x: (full.width - width) / 2,
+        y: (full.height - height) / 2,
+        width,
+        height,
+    };
+    let block = Block::bordered()
+        .title(format!(" {title} ").bold())
+        .border_style(Style::new().fg(Color::Yellow));
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+    let [text, bar] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(inner);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw(format!("{step}…")),
+            Span::raw(format!("  {}s", elapsed.as_secs())).dim(),
+        ])),
+        text,
+    );
+    if let MoveStep::Copying { done, total } = step {
+        let ratio = if total == 0 { 1.0 } else { done as f64 / total as f64 };
+        f.render_widget(
+            Gauge::default()
+                .gauge_style(Style::new().fg(Color::Yellow))
+                .ratio(ratio)
+                .label(format!("{}%", (ratio * 100.0).round())),
+            bar,
+        );
+    }
+}

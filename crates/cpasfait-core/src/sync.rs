@@ -510,23 +510,58 @@ pub fn sync_tab(repo: &mut Repo, tab: TabId, backend: &dyn RemoteBackend, me: &I
 
 // ----------------------------------------------------------------- moves
 
+/// Where a tab move ([`move_tab`], [`accept_move`]) is, for progress displays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MoveStep {
+    /// Syncing with the old remote (to announce the move).
+    SyncOld,
+    /// Listing the files of both remotes.
+    Listing,
+    /// Copying the files the new remote lacks.
+    Copying { done: usize, total: usize },
+    /// Syncing with the new remote.
+    SyncNew,
+}
+
+impl std::fmt::Display for MoveStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MoveStep::SyncOld => f.write_str("syncing with the old remote"),
+            MoveStep::Listing => f.write_str("listing files"),
+            MoveStep::Copying { done, total } => write!(f, "copying files: {done}/{total}"),
+            MoveStep::SyncNew => f.write_str("syncing with the new remote"),
+        }
+    }
+}
+
 /// Copy every file of `tab` that `to` lacks from `from` (files are
 /// immutable, and encrypted for their path: they are valid as they are).
 /// Returns the number of files copied.
-pub fn copy_tab(tab: TabId, from: &dyn RemoteBackend, to: &dyn RemoteBackend) -> Result<usize> {
+pub fn copy_tab(
+    tab: TabId,
+    from: &dyn RemoteBackend,
+    to: &dyn RemoteBackend,
+    progress: &mut dyn FnMut(MoveStep),
+) -> Result<usize> {
+    progress(MoveStep::Listing);
     let ours = |p: &str| parse_key_path(tab, p).is_some() || parse_segment_path(tab, p).is_some();
     let have: HashSet<String> = to.list(&tab.to_string())?.into_iter().collect();
+    let todo: Vec<String> = from
+        .list(&tab.to_string())?
+        .into_iter()
+        .filter(|p| ours(p) && !have.contains(p))
+        .collect();
+    let total = todo.len();
     let mut copied = 0;
-    for path in from.list(&tab.to_string())? {
-        if !ours(&path) || have.contains(&path) {
-            continue;
-        }
-        match to.put_new(&path, &from.get(&path)?) {
+    for (done, path) in todo.iter().enumerate() {
+        progress(MoveStep::Copying { done, total });
+        match to.put_new(path, &from.get(path)?) {
             Ok(()) => copied += 1,
             Err(Error::AlreadyExists(_)) => {}
             Err(e) => return Err(e),
         }
     }
+    progress(MoveStep::Copying { done: total, total });
     Ok(copied)
 }
 
@@ -545,14 +580,17 @@ pub fn move_tab(
     new: &dyn RemoteBackend,
     new_remote: &RemoteConfig,
     me: &Identity,
+    progress: &mut dyn FnMut(MoveStep),
 ) -> Result<usize> {
     if repo.epochs(tab)?.is_empty() {
         return Err(Error::Invalid("this tab is not shared".into()));
     }
     repo.propose_move(tab, &new_remote.spec())?;
+    progress(MoveStep::SyncOld);
     sync_tab(repo, tab, old, me)?;
-    let copied = copy_tab(tab, old, new)?;
+    let copied = copy_tab(tab, old, new, progress)?;
     repo.set_remote(tab, Some(new_remote))?;
+    progress(MoveStep::SyncNew);
     sync_tab(repo, tab, new, me)?;
     Ok(copied)
 }
@@ -579,6 +617,7 @@ pub fn accept_move(
     new: &dyn RemoteBackend,
     new_remote: &RemoteConfig,
     me: &Identity,
+    progress: &mut dyn FnMut(MoveStep),
 ) -> Result<AcceptReport> {
     let pending = repo
         .tabs()?
@@ -599,13 +638,14 @@ pub fn accept_move(
     let mut report = AcceptReport::default();
     // Nothing is written to the old remote: unpushed ops go to the new one.
     if let Some(old) = old {
-        match copy_tab(tab, old, new) {
+        match copy_tab(tab, old, new, progress) {
             Ok(n) => report.copied = n,
             Err(e) => report.warnings.push(format!("copying from the old remote: {e}")),
         }
     }
     repo.set_remote(tab, Some(new_remote))?;
     repo.mark_move_done(tab, pending.id)?;
+    progress(MoveStep::SyncNew);
     if let Err(e) = sync_tab(repo, tab, new, me) {
         report.warnings.push(format!("new remote: {e}"));
     }

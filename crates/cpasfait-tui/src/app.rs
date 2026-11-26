@@ -10,7 +10,7 @@ use cpasfait_core::crypto::Identity;
 use cpasfait_core::dates::{parse_date, today_local};
 use cpasfait_core::report::fmt_duration;
 use cpasfait_core::score::{PRIORITY_MAX, PRIORITY_MIN};
-use cpasfait_core::sync::{invited_to, remote_tabs, sync_tab};
+use cpasfait_core::sync::{MoveStep, invited_to, remote_tabs, sync_tab};
 use cpasfait_core::taskfile;
 use cpasfait_core::{Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -57,6 +57,11 @@ pub enum Request {
     /// ending after the given time (Unix ms) only.
     EditTask(TaskId, Option<i64>),
     Sync,
+    /// Move the current tab to that remote (see [`App::move_tab`]): slow, so
+    /// run where progress can be shown.
+    MoveTab(RemoteConfig),
+    /// Follow a move of the current tab to that remote (see [`App::accept_move`]).
+    AcceptMove(RemoteConfig),
 }
 
 pub struct App {
@@ -153,6 +158,61 @@ impl App {
 
     /// Load the identity, creating one if there is none. Returns a note when
     /// it was just created.
+    /// Move the current tab to `config` (`:tabmove`), telling `progress`
+    /// where it is. The result is reported in the message line.
+    pub fn move_tab(&mut self, config: &RemoteConfig, progress: &mut dyn FnMut(MoveStep)) {
+        let res = (|| -> Result<usize> {
+            let tab = self.tab_id()?;
+            let old = self
+                .tab()
+                .and_then(|t| t.remote.clone())
+                .ok_or_else(|| anyhow!("this tab has no remote: use :tabremote"))?;
+            self.ensure_identity()?;
+            let (from, to) = (backend::open(&old)?, backend::open(config)?);
+            let me = self.identity.as_ref().expect("loaded");
+            Ok(cpasfait_core::sync::move_tab(&mut self.repo, tab, from.as_ref(), to.as_ref(), config, me, progress)?)
+        })();
+        let _ = self.refresh();
+        match res {
+            Ok(n) => self.info(format!(
+                "moved to {} ({n} files copied); the other members are asked to follow. The old remote can be \
+                 deleted once they have",
+                config.spec()
+            )),
+            Err(e) => self.error(format!("moving the tab: {e:#}")),
+        }
+    }
+
+    /// Follow a move of the current tab to `config` (`:tabaccept`).
+    pub fn accept_move(&mut self, config: &RemoteConfig, progress: &mut dyn FnMut(MoveStep)) {
+        let res = (|| -> Result<cpasfait_core::sync::AcceptReport> {
+            let tab = self.tab_id()?;
+            self.ensure_identity()?;
+            let old = self
+                .tab()
+                .and_then(|t| t.remote.clone())
+                .and_then(|r| backend::open(&r).ok());
+            let new = backend::open(config)?;
+            let me = self.identity.as_ref().expect("loaded");
+            Ok(cpasfait_core::sync::accept_move(&mut self.repo, tab, old.as_deref(), new.as_ref(), config, me, progress)?)
+        })();
+        let _ = self.refresh();
+        match res {
+            Ok(r) => {
+                let mut msg = format!("now using {}", config.spec());
+                if r.copied > 0 {
+                    msg.push_str(&format!(" ({} late files copied)", r.copied));
+                }
+                if r.warnings.is_empty() {
+                    self.info(msg);
+                } else {
+                    self.error(format!("{msg}; {}", r.warnings.join("; ")));
+                }
+            }
+            Err(e) => self.error(format!("{e:#}")),
+        }
+    }
+
     fn ensure_identity(&mut self) -> Result<Option<String>> {
         if self.identity.is_some() {
             return Ok(None);
@@ -1168,7 +1228,6 @@ impl App {
                 }
             }
             "tabmove" => {
-                let tab = self.tab_id()?;
                 let old = self
                     .tab()
                     .and_then(|t| t.remote.clone())
@@ -1181,18 +1240,9 @@ impl App {
                     bail!("already there");
                 }
                 self.ensure_identity()?;
-                let (from, to) = (backend::open(&old)?, backend::open(&config)?);
-                let me = self.identity.as_ref().expect("loaded");
-                let n = cpasfait_core::sync::move_tab(&mut self.repo, tab, from.as_ref(), to.as_ref(), &config, me)?;
-                self.refresh()?;
-                self.info(format!(
-                    "moved to {} ({n} files copied); the other members are asked to follow. The old remote can be \
-                     deleted once they have",
-                    config.spec()
-                ));
+                self.requests.push(Request::MoveTab(config));
             }
             "tabaccept" => {
-                let tab = self.tab_id()?;
                 let pending = self
                     .tab()
                     .and_then(|t| t.pending_move.clone())
@@ -1204,24 +1254,7 @@ impl App {
                 }
                 let config = parse_remote(arg)?;
                 self.ensure_identity()?;
-                let old = self
-                    .tab()
-                    .and_then(|t| t.remote.clone())
-                    .and_then(|r| backend::open(&r).ok());
-                let new = backend::open(&config)?;
-                let me = self.identity.as_ref().expect("loaded");
-                let r =
-                    cpasfait_core::sync::accept_move(&mut self.repo, tab, old.as_deref(), new.as_ref(), &config, me)?;
-                self.refresh()?;
-                let mut msg = format!("now using {}", config.spec());
-                if r.copied > 0 {
-                    msg.push_str(&format!(" ({} late files copied)", r.copied));
-                }
-                if r.warnings.is_empty() {
-                    self.info(msg);
-                } else {
-                    self.error(format!("{msg}; {}", r.warnings.join("; ")));
-                }
+                self.requests.push(Request::AcceptMove(config));
             }
             "tabinvite" => {
                 let usage = "usage: :tabinvite KEY [NAME] (KEY: age1… or ssh-ed25519 AAAA…, see :mykey)";

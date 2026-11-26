@@ -106,6 +106,23 @@ fn final_sync(repo: &mut Repo) {
     }
 }
 
+/// A progress callback for a long operation that keeps the UI busy: draws
+/// a popup over the current screen (keys pressed meanwhile are handled after).
+fn progress_popup<'a>(
+    terminal: &'a mut DefaultTerminal,
+    app: &mut App,
+    title: String,
+) -> Result<impl FnMut(cpasfait_core::sync::MoveStep) + use<'a>> {
+    let screen = terminal.draw(|f| ui::render(f, app))?.buffer.clone();
+    let start = Instant::now();
+    Ok(move |step| {
+        let _ = terminal.draw(|f| {
+            f.buffer_mut().clone_from(&screen);
+            ui::render_progress(f, &title, step, start.elapsed());
+        });
+    })
+}
+
 fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker>) -> Result<()> {
     let mut last_edit_sync: Option<Instant> = None;
     let mut last_due_check: Option<Instant> = None;
@@ -143,6 +160,14 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
                     if let Err(e) = edit_notes(terminal, app, task) {
                         app.error(format!("{e:#}"));
                     }
+                }
+                Request::MoveTab(config) => {
+                    let mut progress = progress_popup(terminal, app, format!("Moving the tab to {}", config.spec()))?;
+                    app.move_tab(&config, &mut progress);
+                }
+                Request::AcceptMove(config) => {
+                    let mut progress = progress_popup(terminal, app, format!("Switching to {}", config.spec()))?;
+                    app.accept_move(&config, &mut progress);
                 }
                 Request::EditTask(task, since) => match app.task_file(task, since) {
                     Ok((text, since)) => {
