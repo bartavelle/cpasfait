@@ -585,18 +585,28 @@ fn moving_a_tab_between_remotes() {
     assert!(message(&alice).starts_with("moved to "), "{}", message(&alice));
     {
         use cpasfait_core::sync::MoveStep::*;
-        let n = steps.len();
-        assert_eq!(steps[..2], [SyncOld, Listing]);
-        assert_eq!(steps[2], Copying { done: 0, total: n - 4 });
-        assert_eq!(steps[n - 2..], [Copying { done: n - 4, total: n - 4 }, SyncNew]);
+        let Some(&Downloading { total, .. }) = steps.get(2) else {
+            panic!("{steps:?}")
+        };
+        assert!(total > 0);
+        let mut expected = vec![SyncOld, Listing];
+        expected.extend((0..=total).map(|done| Downloading { done, total }));
+        expected.extend((0..=total).map(|done| Uploading { done, total }));
+        expected.push(SyncNew);
+        assert_eq!(steps, expected);
         // What the popup looks like.
         let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(50, 6)).unwrap();
         t.draw(|f| {
-            crate::ui::render_progress(f, "Moving", Copying { done: 1, total: 4 }, std::time::Duration::from_secs(3))
+            crate::ui::render_progress(
+                f,
+                "Moving",
+                Uploading { done: 1, total: 4 },
+                std::time::Duration::from_secs(3),
+            )
         })
         .unwrap();
         let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();
-        assert!(text.contains("copying files: 1/4…  3s"), "{text}");
+        assert!(text.contains("uploading files: 1/4…  3s"), "{text}");
         assert!(text.contains("25%"), "{text}");
     }
     assert!(two.join(tab.to_string()).join("keys").is_dir());
@@ -616,7 +626,10 @@ fn moving_a_tab_between_remotes() {
     let Mode::Command(e) = &bob.mode else { panic!() };
     assert_eq!(e.text(), format!("tabaccept {}", two.display()));
     press(&mut bob, "<enter>");
-    assert_eq!(run_moves(&mut bob).last(), Some(&cpasfait_core::sync::MoveStep::SyncNew));
+    assert_eq!(
+        run_moves(&mut bob).last(),
+        Some(&cpasfait_core::sync::MoveStep::SyncNew)
+    );
     assert_eq!(message(&bob), format!("now using {}", two.display()));
     assert!(!screen(&mut bob, 80, 5).contains('↪'));
     assert_eq!(
@@ -804,9 +817,15 @@ fn edit_task_in_editor() {
     };
     let month_ago = Some(ms("2023-10-15T00:00"));
     press(&mut app, "E");
-    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, month_ago)]);
+    assert_eq!(
+        std::mem::take(&mut app.requests),
+        vec![Request::EditTask(task, month_ago)]
+    );
     press(&mut app, ":edit<enter>");
-    assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, month_ago)]);
+    assert_eq!(
+        std::mem::take(&mut app.requests),
+        vec![Request::EditTask(task, month_ago)]
+    );
     press(&mut app, ":edit all<enter>");
     assert_eq!(std::mem::take(&mut app.requests), vec![Request::EditTask(task, None)]);
     press(&mut app, ":edit 2023-11-01<enter>");
@@ -902,7 +921,10 @@ fn due_times_and_notifications() {
     let due = app.repo.task(t).unwrap().due.unwrap();
     assert_eq!(due.to_string(), "2026-11-25 14:30", "a time alone is today");
     press(&mut app, ":due tom 9:15:30<enter>");
-    assert_eq!(app.repo.task(t).unwrap().due.unwrap().to_string(), "2026-11-26 09:15:30");
+    assert_eq!(
+        app.repo.task(t).unwrap().due.unwrap().to_string(),
+        "2026-11-26 09:15:30"
+    );
     press(&mut app, ":due 25:00<enter>");
     assert!(message(&app).starts_with("can't parse due date"), "{}", message(&app));
     press(&mut app, ":due 14:30<enter>");

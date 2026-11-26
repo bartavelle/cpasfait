@@ -19,6 +19,23 @@ pub trait RemoteBackend: Send {
     /// Create `path` with `data`. Must fail if it already exists, and must not
     /// expose a partially written file to readers.
     fn put_new(&self, path: &str, data: &[u8]) -> Result<()>;
+
+    /// Create several files, as [`put_new`](Self::put_new) each (for backends
+    /// where that is much faster than one at a time); files that already
+    /// exist are left as they are. Calls `progress` with the number of files
+    /// done so far. Returns the number of files created.
+    fn put_new_many(&self, files: &[(String, Vec<u8>)], progress: &mut dyn FnMut(usize)) -> Result<usize> {
+        let mut created = 0;
+        for (i, (path, data)) in files.iter().enumerate() {
+            match self.put_new(path, data) {
+                Ok(()) => created += 1,
+                Err(crate::Error::AlreadyExists(_)) => {}
+                Err(e) => return Err(e),
+            }
+            progress(i + 1);
+        }
+        Ok(created)
+    }
 }
 
 pub fn open(config: &RemoteConfig) -> Result<Box<dyn RemoteBackend>> {

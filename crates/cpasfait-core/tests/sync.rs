@@ -424,7 +424,16 @@ fn moving_to_another_remote() {
     std::os::unix::fs::symlink(&p2, &link).unwrap();
     c.sync(tab, &old).unwrap();
     let elsewhere = LocalDir::new(&link);
-    accept_move(&mut c.repo, tab, Some(&old), &elsewhere, &local(&link), &c.id, &mut |_| {}).unwrap();
+    accept_move(
+        &mut c.repo,
+        tab,
+        Some(&old),
+        &elsewhere,
+        &local(&link),
+        &c.id,
+        &mut |_| {},
+    )
+    .unwrap();
     c.repo.set_title(t, "after").unwrap();
     c.sync(tab, &elsewhere).unwrap();
 

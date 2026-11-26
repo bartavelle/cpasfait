@@ -712,7 +712,7 @@ pub fn render_progress(f: &mut Frame, title: &str, step: cpasfait_core::sync::Mo
         ])),
         text,
     );
-    if let MoveStep::Copying { done, total } = step {
+    if let MoveStep::Downloading { done, total } | MoveStep::Uploading { done, total } = step {
         let ratio = if total == 0 { 1.0 } else { done as f64 / total as f64 };
         f.render_widget(
             Gauge::default()

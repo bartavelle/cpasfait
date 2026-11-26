@@ -131,3 +131,43 @@ fn rrsync_restricted_key() {
         other => panic!("{other:?}"),
     }
 }
+
+/// Many files at once: one rsync run (ssh connection) per batch of 100.
+#[test]
+fn upload_many_files_in_batches() {
+    if !have_rsync() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let ssh = fake_ssh(tmp.path());
+    // Count the connections.
+    let counting = tmp.path().join("counting-ssh");
+    let log = tmp.path().join("calls");
+    std::fs::write(
+        &counting,
+        format!("#!/bin/sh\necho >> '{}'\nexec {ssh} \"$@\"\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&counting, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let calls = || std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+    // The remote directory's parents do not exist yet.
+    let remote = tmp.path().join("remote/deep/shared");
+    let b = Rsync::new(&format!("me@h:{}", remote.display()), tmp.path().join("m"))
+        .with_ssh(&counting.display().to_string());
+
+    let files: Vec<(String, Vec<u8>)> = (0..150)
+        .map(|i| (format!("t/ops/d{}/{i}.seg", i % 3), format!("data {i}").into_bytes()))
+        .collect();
+    let mut seen = vec![];
+    assert_eq!(b.put_new_many(&files, &mut |n| seen.push(n)).unwrap(), 150);
+    assert_eq!(seen, vec![100, 150]);
+    // Two batches; the first one also created the missing parents.
+    assert_eq!(calls(), 3);
+    for (p, data) in &files {
+        assert_eq!(&std::fs::read(remote.join(p)).unwrap(), data);
+    }
+    // Again: nothing new, nothing overwritten.
+    let changed: Vec<_> = files.iter().map(|(p, _)| (p.clone(), b"other".to_vec())).collect();
+    assert_eq!(b.put_new_many(&changed, &mut |_| {}).unwrap(), 0);
+    assert_eq!(std::fs::read(remote.join("t/ops/d0/0.seg")).unwrap(), b"data 0");
+}

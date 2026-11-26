@@ -7,7 +7,8 @@
 //!
 //! - `list(prefix)` pulls the tab's directory into the mirror, then lists it;
 //! - `get` reads the mirror;
-//! - `put_new` writes into the mirror, then pushes that one file.
+//! - `put_new` writes into the mirror, then pushes that one file
+//!   (`put_new_many`: many files, with one rsync run per batch).
 //!
 //! The system's `rsync` and `ssh` are used, so `~/.ssh/config`, ssh-agent,
 //! hardware keys and `known_hosts` apply. ssh runs in batch mode (sync runs
@@ -34,6 +35,10 @@ pub const SSH: &str = "ssh -o BatchMode=yes -o ConnectTimeout=20";
 /// A directory listed twice within this delay is not pulled again (a sync
 /// lists `<tab>/keys` then `<tab>/ops`: one pull of `<tab>` serves both).
 const PULL_REUSE: Duration = Duration::from_secs(2);
+
+/// Files pushed per rsync run by `put_new_many` (each run is an ssh
+/// connection; batches let progress be shown).
+const PUSH_BATCH: usize = 100;
 
 pub struct Rsync {
     /// rsync location of the remote root: `host:path`, `user@host:path`, or a local path.
@@ -157,20 +162,31 @@ impl Rsync {
         (!host.contains('/')).then_some((host, path))
     }
 
-    /// Upload one mirror file (creating its directories on the remote).
-    fn push(&self, rel: &str) -> Result<()> {
-        // `-R` recreates the relative path under the destination; rsync
+    /// Upload mirror files (creating their directories on the remote), in
+    /// one rsync run.
+    fn push(&self, rels: &[&str]) -> Result<()> {
+        // The list of files, relative to the mirror (`--files-from` implies
+        // `-R`: their path is recreated under the destination). rsync
         // creates the destination itself, but not its missing parents.
+        let list = std::env::temp_dir().join(format!("cpasfait-push-{}", uuid::Uuid::now_v7()));
+        std::fs::write(&list, rels.join("\n") + "\n")?;
+        let files_from = format!("--files-from={}", list.display());
+        let res = self.push_list(&files_from);
+        let _ = std::fs::remove_file(&list);
+        res
+    }
+
+    fn push_list(&self, files_from: &str) -> Result<()> {
         let dst = self.remote_path("");
         let Some((_, path)) = self.split_remote() else {
             std::fs::create_dir_all(&self.remote)?;
-            return self.rsync(&["-R", rel, &dst], Some(&self.mirror_root));
+            return self.rsync(&[files_from, ".", &dst], Some(&self.mirror_root));
         };
-        match self.rsync(&["-R", rel, &dst], Some(&self.mirror_root)) {
+        match self.rsync(&[files_from, ".", &dst], Some(&self.mirror_root)) {
             Err(Error::Backend(m)) if m.contains("No such file or directory") => {
                 // Not possible through rrsync, which only runs rsync.
                 let mkdir = format!("--rsync-path=mkdir -p '{}' && rsync", path.replace('\'', "'\\''"));
-                self.rsync(&["-R", &mkdir, rel, &dst], Some(&self.mirror_root))
+                self.rsync(&[&mkdir, files_from, ".", &dst], Some(&self.mirror_root))
                     .map_err(|e| match e {
                         Error::Backend(m2) => Error::Backend(format!("{m} (then, creating the directory: {m2})")),
                         e => e,
@@ -204,7 +220,7 @@ impl RemoteBackend for Rsync {
     fn put_new(&self, path: &str, data: &[u8]) -> Result<()> {
         match self.mirror.put_new(path, data) {
             Ok(()) => {
-                if let Err(e) = self.push(path) {
+                if let Err(e) = self.push(&[path]) {
                     // Not on the remote: don't let the mirror pretend it is.
                     let _ = std::fs::remove_file(self.mirror_root.join(path));
                     return Err(e);
@@ -214,11 +230,38 @@ impl RemoteBackend for Rsync {
             Err(Error::AlreadyExists(p)) => {
                 // Maybe written by an earlier, interrupted run: make sure the
                 // remote has it.
-                self.push(path)?;
+                self.push(&[path])?;
                 Err(Error::AlreadyExists(p))
             }
             Err(e) => Err(e),
         }
+    }
+
+    fn put_new_many(&self, files: &[(String, Vec<u8>)], progress: &mut dyn FnMut(usize)) -> Result<usize> {
+        let (mut created, mut done) = (0, 0);
+        for batch in files.chunks(PUSH_BATCH) {
+            let mut new = vec![];
+            for (path, data) in batch {
+                match self.mirror.put_new(path, data) {
+                    Ok(()) => new.push(path),
+                    // Pushed again below, in case an earlier run was interrupted.
+                    Err(Error::AlreadyExists(_)) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            let paths: Vec<&str> = batch.iter().map(|(p, _)| p.as_str()).collect();
+            if let Err(e) = self.push(&paths) {
+                // Not on the remote: don't let the mirror pretend they are.
+                for p in new {
+                    let _ = std::fs::remove_file(self.mirror_root.join(p));
+                }
+                return Err(e);
+            }
+            created += new.len();
+            done += batch.len();
+            progress(done);
+        }
+        Ok(created)
     }
 }
 

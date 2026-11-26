@@ -170,7 +170,15 @@ impl App {
             self.ensure_identity()?;
             let (from, to) = (backend::open(&old)?, backend::open(config)?);
             let me = self.identity.as_ref().expect("loaded");
-            Ok(cpasfait_core::sync::move_tab(&mut self.repo, tab, from.as_ref(), to.as_ref(), config, me, progress)?)
+            Ok(cpasfait_core::sync::move_tab(
+                &mut self.repo,
+                tab,
+                from.as_ref(),
+                to.as_ref(),
+                config,
+                me,
+                progress,
+            )?)
         })();
         let _ = self.refresh();
         match res {
@@ -194,7 +202,15 @@ impl App {
                 .and_then(|r| backend::open(&r).ok());
             let new = backend::open(config)?;
             let me = self.identity.as_ref().expect("loaded");
-            Ok(cpasfait_core::sync::accept_move(&mut self.repo, tab, old.as_deref(), new.as_ref(), config, me, progress)?)
+            Ok(cpasfait_core::sync::accept_move(
+                &mut self.repo,
+                tab,
+                old.as_deref(),
+                new.as_ref(),
+                config,
+                me,
+                progress,
+            )?)
         })();
         let _ = self.refresh();
         match res {
@@ -898,7 +914,9 @@ impl App {
                 .date()
                 .checked_sub(jiff::Span::new().days(EDIT_DAYS))?,
         };
-        Ok(Some(day.to_zoned_datetime(self.tz.clone())?.timestamp().as_millisecond()))
+        Ok(Some(
+            day.to_zoned_datetime(self.tz.clone())?.timestamp().as_millisecond(),
+        ))
     }
 
     /// The text to edit for `task` and the window it covers: its title and

@@ -52,7 +52,12 @@ impl std::fmt::Display for Applied {
         if self.title {
             parts.push("title changed".to_owned());
         }
-        for (n, what) in [(self.merged, "merged (overlapping)"), (self.added, "added"), (self.changed, "changed"), (self.deleted, "deleted")] {
+        for (n, what) in [
+            (self.merged, "merged (overlapping)"),
+            (self.added, "added"),
+            (self.changed, "changed"),
+            (self.deleted, "deleted"),
+        ] {
             if n > 0 {
                 parts.push(format!("{n} session{} {what}", if n > 1 { "s" } else { "" }));
             }
@@ -155,7 +160,10 @@ fn parse_dt(s: &str, tz: &TimeZone) -> Option<i64> {
 /// Read a file written by [`render`] (and edited). `Ok(None)`: the file is
 /// empty (cancel).
 pub fn parse(text: &str, tz: &TimeZone) -> Result<Option<TaskFile>> {
-    if text.lines().all(|l| l.trim().is_empty() || l.trim_start().starts_with('#')) {
+    if text
+        .lines()
+        .all(|l| l.trim().is_empty() || l.trim_start().starts_with('#'))
+    {
         return Ok(None);
     }
     let err = |n: usize, msg: String| Error::Invalid(format!("line {n}: {msg}"));
@@ -184,10 +192,18 @@ pub fn parse(text: &str, tz: &TimeZone) -> Result<Option<TaskFile>> {
             continue;
         }
         if !in_log {
-            return Err(err(n, format!("expected \"title: …\" or \"work log:\", got {trimmed:?}")));
+            return Err(err(
+                n,
+                format!("expected \"title: …\" or \"work log:\", got {trimmed:?}"),
+            ));
         }
         let span = trimmed.split('#').next().unwrap_or_default().trim();
-        let bad = || err(n, format!("expected \"YYYY-MM-DD HH:MM:SS - YYYY-MM-DD HH:MM:SS\", got {span:?}"));
+        let bad = || {
+            err(
+                n,
+                format!("expected \"YYYY-MM-DD HH:MM:SS - YYYY-MM-DD HH:MM:SS\", got {span:?}"),
+            )
+        };
         let (start, end) = match span.strip_suffix('-') {
             Some(start) => (start, ""),
             None => span.split_once(" - ").ok_or_else(bad)?,
@@ -254,7 +270,10 @@ pub fn apply(repo: &mut Repo, task: TaskId, file: &TaskFile, since: Option<i64>)
     // Unchanged lines.
     let mut new: Vec<(usize, Span)> = vec![];
     for &(n, span) in &work {
-        match old.iter().position(|s| key(s.start.unwrap_or_default(), s.end) == key(span.start, span.end)) {
+        match old
+            .iter()
+            .position(|s| key(s.start.unwrap_or_default(), s.end) == key(span.start, span.end))
+        {
             Some(i) => {
                 old.remove(i);
             }

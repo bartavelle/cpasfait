@@ -517,8 +517,10 @@ pub enum MoveStep {
     SyncOld,
     /// Listing the files of both remotes.
     Listing,
-    /// Copying the files the new remote lacks.
-    Copying { done: usize, total: usize },
+    /// Downloading the files the new remote lacks.
+    Downloading { done: usize, total: usize },
+    /// Uploading them.
+    Uploading { done: usize, total: usize },
     /// Syncing with the new remote.
     SyncNew,
 }
@@ -528,7 +530,8 @@ impl std::fmt::Display for MoveStep {
         match self {
             MoveStep::SyncOld => f.write_str("syncing with the old remote"),
             MoveStep::Listing => f.write_str("listing files"),
-            MoveStep::Copying { done, total } => write!(f, "copying files: {done}/{total}"),
+            MoveStep::Downloading { done, total } => write!(f, "downloading files: {done}/{total}"),
+            MoveStep::Uploading { done, total } => write!(f, "uploading files: {done}/{total}"),
             MoveStep::SyncNew => f.write_str("syncing with the new remote"),
         }
     }
@@ -552,17 +555,15 @@ pub fn copy_tab(
         .filter(|p| ours(p) && !have.contains(p))
         .collect();
     let total = todo.len();
-    let mut copied = 0;
-    for (done, path) in todo.iter().enumerate() {
-        progress(MoveStep::Copying { done, total });
-        match to.put_new(path, &from.get(path)?) {
-            Ok(()) => copied += 1,
-            Err(Error::AlreadyExists(_)) => {}
-            Err(e) => return Err(e),
-        }
+    let mut files = Vec::with_capacity(total);
+    for (done, path) in todo.into_iter().enumerate() {
+        progress(MoveStep::Downloading { done, total });
+        let data = from.get(&path)?;
+        files.push((path, data));
     }
-    progress(MoveStep::Copying { done: total, total });
-    Ok(copied)
+    progress(MoveStep::Downloading { done: total, total });
+    progress(MoveStep::Uploading { done: 0, total });
+    to.put_new_many(&files, &mut |done| progress(MoveStep::Uploading { done, total }))
 }
 
 /// Move a shared tab from `old` to `new` (`new_remote`):

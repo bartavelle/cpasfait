@@ -168,7 +168,8 @@ fn next_task_and_persistence() {
         let b = r.add_task(tab, Place::LastChildOf(None), "b").unwrap();
         r.set_priority(b, 2).unwrap();
         r.set_tag(a, "x", true).unwrap();
-        r.set_due(a, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 1, 1)))).unwrap();
+        r.set_due(a, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 1, 1))))
+            .unwrap();
         r.set_status(b, Status::Done).unwrap();
     }
     let r = Repo::open_readonly(&path).unwrap();
@@ -467,7 +468,8 @@ fn move_a_task_to_another_tab() {
     let waits = r.add_task(a, Place::LastChildOf(None), "after step 1").unwrap();
     r.add_task(b, Place::LastChildOf(None), "already in b").unwrap();
     r.set_priority(root, 2).unwrap();
-    r.set_due(root, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 12, 1)))).unwrap();
+    r.set_due(root, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 12, 1))))
+        .unwrap();
     r.set_tag(root, "acme", true).unwrap();
     r.set_notes(root, "some notes").unwrap();
     r.toggle_done(grandchild).unwrap();
@@ -526,7 +528,10 @@ fn move_a_task_to_another_tab() {
         ]
     );
     let p = r.task(moved.id).unwrap();
-    assert_eq!((p.priority, p.notes.as_str(), p.tags.clone()), (2, "some notes", vec!["acme".to_owned()]));
+    assert_eq!(
+        (p.priority, p.notes.as_str(), p.tags.clone()),
+        (2, "some notes", vec!["acme".to_owned()])
+    );
     assert_eq!(p.due, Some(cpasfait_core::Due::day(jiff::civil::date(2026, 12, 1))));
     assert_eq!(p.author.as_ref().map(|a| a.name.as_str()), Some(r.user()));
     assert_eq!(p.blocked_by, vec![stays]);
@@ -538,7 +543,10 @@ fn move_a_task_to_another_tab() {
     assert!(r.tree(a).unwrap().is_blocked(waits));
     // the work log moved, time counted once, the running session goes on
     let active = r.active_session().unwrap().unwrap();
-    assert_eq!((active.task, active.tab, active.note.as_str()), (Some(new_child), b, "started"));
+    assert_eq!(
+        (active.task, active.tab, active.note.as_str()),
+        (Some(new_child), b, "started")
+    );
     assert_eq!(r.sessions_for_task(moved.id).unwrap()[0].duration_ms(0), 30 * min);
     let total_after: i64 = report::slices(&r, 0, i64::MAX / 2, &Filter::default())
         .unwrap()
@@ -558,7 +566,11 @@ fn due_notices() {
     use jiff::civil::{date, time};
     let tz = jiff::tz::TimeZone::UTC;
     let ms = |d: jiff::civil::Date, h: i8, m: i8| {
-        d.at(h, m, 0, 0).to_zoned_datetime(tz.clone()).unwrap().timestamp().as_millisecond()
+        d.at(h, m, 0, 0)
+            .to_zoned_datetime(tz.clone())
+            .unwrap()
+            .timestamp()
+            .as_millisecond()
     };
     let today = date(2026, 11, 25);
     let (mut r, clock) = repo_with_clock();
@@ -574,14 +586,15 @@ fn due_notices() {
     let done = add(&mut r, "done", Due::day(today));
     r.toggle_done(done).unwrap();
     let parent = r.add_task(tab, Place::LastChildOf(None), "parent").unwrap();
-    let under = r.add_task(tab, Place::LastChildOf(Some(parent)), "under deleted").unwrap();
+    let under = r
+        .add_task(tab, Place::LastChildOf(Some(parent)), "under deleted")
+        .unwrap();
     r.set_due(under, Some(Due::day(today))).unwrap();
     r.delete_task(parent).unwrap();
     add(&mut r, "later", Due::day(date(2026, 11, 26)));
 
-    let titles = |r: &mut Repo| -> Vec<String> {
-        r.take_due_notices(&tz).unwrap().into_iter().map(|n| n.title).collect()
-    };
+    let titles =
+        |r: &mut Repo| -> Vec<String> { r.take_due_notices(&tz).unwrap().into_iter().map(|n| n.title).collect() };
     assert_eq!(titles(&mut r), ["report"]);
     assert!(titles(&mut r).is_empty(), "announced once");
     clock.store(ms(today, 14, 30), Ordering::SeqCst);

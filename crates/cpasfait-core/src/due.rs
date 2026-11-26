@@ -54,7 +54,10 @@ impl std::str::FromStr for Due {
         let s = s.trim();
         // (jiff parses a date-time as a date, dropping the time)
         if !s.contains(':') {
-            return s.parse::<Date>().map(Due::day).map_err(|_| format!("bad due date {s:?}"));
+            return s
+                .parse::<Date>()
+                .map(Due::day)
+                .map_err(|_| format!("bad due date {s:?}"));
         }
         match s.parse::<DateTime>() {
             Ok(dt) => {
@@ -93,7 +96,10 @@ mod tests {
         }
         assert!(d < t && t < s && s < Due::day(date(2026, 12, 2)));
         let tz = TimeZone::UTC;
-        assert_eq!(t.moment_ms(&tz).unwrap() - d.moment_ms(&tz).unwrap(), (14 * 60 + 30) * 60_000);
+        assert_eq!(
+            t.moment_ms(&tz).unwrap() - d.moment_ms(&tz).unwrap(),
+            (14 * 60 + 30) * 60_000
+        );
         assert!("2026-13-01".parse::<Due>().is_err());
     }
 }

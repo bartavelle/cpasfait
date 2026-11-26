@@ -769,7 +769,10 @@ impl Repo {
                 e(Change::TaskDue(t.due));
             }
             for tag in &t.tags {
-                e(Change::TaskTag { tag: tag.clone(), on: true });
+                e(Change::TaskTag {
+                    tag: tag.clone(),
+                    on: true,
+                });
             }
             if let Some(a) = &t.author {
                 e(Change::TaskAuthor(a.clone()));
@@ -779,7 +782,11 @@ impl Repo {
                     Some(&b) => (b, Some(to)),
                     None => (blocker, tab),
                 };
-                e(Change::TaskBlockedBy { task: blocker, tab, on: true });
+                e(Change::TaskBlockedBy {
+                    task: blocker,
+                    tab,
+                    on: true,
+                });
             }
             edits.push((from, t.id.0, Change::TaskDeleted(true)));
         }
@@ -796,7 +803,15 @@ impl Repo {
                 if ids.contains_key(&dep) {
                     continue; // copied above
                 }
-                edits.push((dep_tab, dep.0, Change::TaskBlockedBy { task: t.id, tab: None, on: false }));
+                edits.push((
+                    dep_tab,
+                    dep.0,
+                    Change::TaskBlockedBy {
+                        task: t.id,
+                        tab: None,
+                        on: false,
+                    },
+                ));
                 edits.push((
                     dep_tab,
                     dep.0,
@@ -1120,8 +1135,10 @@ impl Repo {
                  WHERE t.due IS NOT NULL AND t.deleted = 0 AND t.status = 'todo' AND tab.deleted = 0
                    AND NOT EXISTS (SELECT 1 FROM due_notified n WHERE n.task = t.id AND n.due = t.due)",
             )?;
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
-                .collect::<rusqlite::Result<_>>()?
+            st.query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?
         };
         let mut out = vec![];
         for (id, tab, title, due_text, parent, tab_name) in rows {

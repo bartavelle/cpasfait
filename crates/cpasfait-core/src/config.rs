@@ -107,7 +107,10 @@ mod tests {
         assert_eq!((c.name, c.identity), (None, None));
         assert_eq!(Config::parse("").unwrap(), Config::default());
         assert!(Config::parse("emial = \"x@y\"").is_err());
-        assert_eq!(Config::parse("notifications = false").unwrap().notifications, Some(false));
+        assert_eq!(
+            Config::parse("notifications = false").unwrap().notifications,
+            Some(false)
+        );
         assert!(Config::parse("email = \"nope\"").is_err());
         let c = Config::parse("name = \"Alice\"\nemail = \"a@b.c\"").unwrap();
         assert_eq!(c.name.as_deref(), Some("Alice"));

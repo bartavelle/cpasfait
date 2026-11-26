@@ -190,7 +190,12 @@ fn clock(s: &str) -> Option<jiff::civil::Time> {
     let (hm, sec) = match s.matches(':').count() {
         2 => {
             let (hm, sec) = s.rsplit_once(':')?;
-            (hm, sec.parse::<i8>().ok().filter(|s| (0..60).contains(s) && sec.len() == 2)?)
+            (
+                hm,
+                sec.parse::<i8>()
+                    .ok()
+                    .filter(|s| (0..60).contains(s) && sec.len() == 2)?,
+            )
         }
         _ => (s, 0),
     };
@@ -234,8 +239,14 @@ mod tests {
         assert_eq!(p("9h"), Some(Due::at(today, time(9, 0, 0, 0))));
         assert_eq!(p("tom 9h30"), Some(Due::at(date(2026, 11, 21), time(9, 30, 0, 0))));
         assert_eq!(p("mon 08:15:30"), Some(Due::at(date(2026, 11, 23), time(8, 15, 30, 0))));
-        assert_eq!(p("2026-12-01 14:30:05"), Some(Due::at(date(2026, 12, 1), time(14, 30, 5, 0))));
-        assert_eq!(p("2026-12-01T14:30"), Some(Due::at(date(2026, 12, 1), time(14, 30, 0, 0))));
+        assert_eq!(
+            p("2026-12-01 14:30:05"),
+            Some(Due::at(date(2026, 12, 1), time(14, 30, 5, 0)))
+        );
+        assert_eq!(
+            p("2026-12-01T14:30"),
+            Some(Due::at(date(2026, 12, 1), time(14, 30, 0, 0)))
+        );
         assert_eq!(p(" +3d  18:00 "), Some(Due::at(date(2026, 11, 23), time(18, 0, 0, 0))));
         for bad in ["25:00", "12:00:60", "12:00:5", "fri 25:00", "noon", "x 12:00", ""] {
             assert_eq!(p(bad), None, "{bad}");

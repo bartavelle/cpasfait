@@ -136,7 +136,9 @@ fn bad_edits_change_nothing() {
     let e = edit(&mut r, a, |t| t + "2026-11-23 10:30 - 2026-11-23 12:00\n");
     assert!(err(e).contains("future"));
     // a new running session
-    let e = edit(&mut r, a, |t| t.replace("title: a", "title: b") + "2026-11-23 08:00 -\n");
+    let e = edit(&mut r, a, |t| {
+        t.replace("title: a", "title: b") + "2026-11-23 08:00 -\n"
+    });
     assert!(err(e).contains("only the running session"));
     assert_eq!(r.local_changes(), before);
     assert_eq!(r.task(a).unwrap().title, "a");
@@ -153,7 +155,10 @@ fn other_users_sessions_are_labelled() {
     r.stop_work().unwrap();
     r.set_user("me").unwrap();
     let text = taskfile::render(&r, a, &TimeZone::UTC, None).unwrap();
-    assert!(text.contains("2026-11-23 09:00:00 - 2026-11-23 10:00:00  # bob"), "{text}");
+    assert!(
+        text.contains("2026-11-23 09:00:00 - 2026-11-23 10:00:00  # bob"),
+        "{text}"
+    );
     assert_eq!(edit(&mut r, a, |t| t).unwrap(), Applied::default());
 }
 
@@ -161,12 +166,21 @@ fn other_users_sessions_are_labelled() {
 fn overlapping_sessions_are_merged() {
     use taskfile::{Span, merge};
     let w = |v: &[(i64, Option<i64>)]| -> Vec<(usize, Span)> {
-        v.iter().enumerate().map(|(i, &(start, end))| (i + 1, Span { start, end })).collect()
+        v.iter()
+            .enumerate()
+            .map(|(i, &(start, end))| (i + 1, Span { start, end }))
+            .collect()
     };
     let spans = |v: Vec<(usize, Span)>| v.into_iter().map(|(_, s)| (s.start, s.end)).collect::<Vec<_>>();
     // unordered, nested, overlapping, touching, separate
     assert_eq!(
-        spans(merge(&w(&[(50, Some(60)), (0, Some(10)), (5, Some(8)), (8, Some(20)), (20, Some(30))]))),
+        spans(merge(&w(&[
+            (50, Some(60)),
+            (0, Some(10)),
+            (5, Some(8)),
+            (8, Some(20)),
+            (20, Some(30))
+        ]))),
         [(0, Some(20)), (20, Some(30)), (50, Some(60))]
     );
     // a running session absorbs everything after its start
@@ -195,7 +209,10 @@ fn overlapping_sessions_are_merged() {
             (ms("2026-11-23T09:00"), Some(ms("2026-11-23T10:30"))),
         ]
     );
-    assert_eq!(applied.to_string(), "2 sessions merged (overlapping), 1 session added, 1 session changed");
+    assert_eq!(
+        applied.to_string(),
+        "2 sessions merged (overlapping), 1 session added, 1 session changed"
+    );
 }
 
 fn spans_of(r: &Repo, task: cpasfait_core::TaskId) -> Vec<(i64, Option<i64>)> {
@@ -207,7 +224,10 @@ fn only_recent_sessions() {
     let (mut r, time) = setup();
     let tab = r.create_tab("work").unwrap();
     let a = r.add_task(tab, Place::LastChildOf(None), "admin").unwrap();
-    for (start, end) in [("2026-11-01T09:00", "2026-11-01T10:00"), ("2026-11-10T09:00", "2026-11-10T10:00")] {
+    for (start, end) in [
+        ("2026-11-01T09:00", "2026-11-01T10:00"),
+        ("2026-11-10T09:00", "2026-11-10T10:00"),
+    ] {
         time.store(ms(start), Ordering::SeqCst);
         r.start_work(a).unwrap();
         time.store(ms(end), Ordering::SeqCst);
@@ -222,12 +242,19 @@ fn only_recent_sessions() {
     assert!(text.contains("1 session ended before 2026-11-05 00:00:00"), "{text}");
     assert!(!text.contains("2026-11-01 09:00:00 -"), "{text}");
     // deleting all shown lines leaves the older session alone
-    let text: String = text.lines().filter(|l| !l.starts_with("2026")).map(|l| format!("{l}\n")).collect();
+    let text: String = text
+        .lines()
+        .filter(|l| !l.starts_with("2026"))
+        .map(|l| format!("{l}\n"))
+        .collect();
     let file = taskfile::parse(&text, &tz).unwrap().unwrap();
     let applied = taskfile::apply(&mut r, a, &file, since).unwrap();
     assert_eq!(applied.deleted, 2);
     assert_eq!(spans(&r, a), [(ms("2026-11-01T09:00"), Some(ms("2026-11-01T10:00")))]);
     // without a window, everything is shown
     let text = taskfile::render(&r, a, &tz, None).unwrap();
-    assert!(text.contains("2026-11-01 09:00:00 -") && !text.contains("Not shown"), "{text}");
+    assert!(
+        text.contains("2026-11-01 09:00:00 -") && !text.contains("Not shown"),
+        "{text}"
+    );
 }
