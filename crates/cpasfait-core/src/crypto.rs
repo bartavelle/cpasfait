@@ -103,6 +103,15 @@ pub fn verify_epoch_mac(prev_key: &Key, tab: TabId, epoch: Uuid, key: &Key, mac:
 
 // ----------------------------------------------------------- recipients
 
+/// A short form of a public key, for display: `age1qyz…k3x9`, `ssh-ed25519 …AbCd`.
+pub fn short_key(key: &str) -> String {
+    match key.split_once(' ') {
+        Some((kind, b64)) => format!("{kind} …{}", &b64[b64.len().saturating_sub(8)..]),
+        None if key.len() > 16 => format!("{}…{}", &key[..8], &key[key.len() - 4..]),
+        None => key.to_owned(),
+    }
+}
+
 /// Canonical form of a member's public key: an age X25519 recipient
 /// (`age1…`) or an SSH public key (`ssh-ed25519 AAAA…`, `ssh-rsa AAAA…`,
 /// a trailing comment is dropped).

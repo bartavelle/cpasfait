@@ -1,0 +1,32 @@
+[package]
+name = "cpasfait-ffi"
+description = "Bindings of cpasfait-core for the mobile apps (Kotlin, through UniFFI)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "cpasfait_ffi"
+
+[[bin]]
+# Generates the Kotlin bindings: see README.md.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[dependencies]
+cpasfait-core.workspace = true
+jiff = "1.0.1"
+thiserror = "2.0.21"
+uniffi = "0.33.0"
+
+[features]
+cli = ["uniffi/cli"]
+
+# Not the workspace lints: the generated scaffolding needs `unsafe`.
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dev-dependencies]
+tempfile = "3.27.0"

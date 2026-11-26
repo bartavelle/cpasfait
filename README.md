@@ -8,9 +8,10 @@ and devices.
 
 | crate | what |
 |---|---|
-| `cpasfait-core` | model, op log, SQLite storage, sync. No UI. Meant to be shared with a future mobile app (UniFFI). |
+| `cpasfait-core` | model, op log, SQLite storage, sync. No UI. |
 | `cpasfait-tui` | the `cpasfait` terminal UI |
 | `cpasfait-tools` | `cpasfait-next`, `cpasfait-report`, `cpasfait-notify`, `cpasfait-key` and `cpasfait-gdrive` |
+| `cpasfait-ffi` | the core for the mobile apps (Kotlin bindings with UniFFI): see its [README](crates/cpasfait-ffi/README.md) |
 
 See `docs/architecture.md` for the design and `docs/format.md` for the data and sync format.
 

@@ -1414,14 +1414,7 @@ fn split_key(arg: &str) -> Option<(String, Option<String>)> {
     Some((key, name))
 }
 
-/// `age1qyz…k3x9`, `ssh-ed25519 …AbCd`.
-pub fn short_key(key: &str) -> String {
-    match key.split_once(' ') {
-        Some((kind, b64)) => format!("{kind} …{}", &b64[b64.len().saturating_sub(8)..]),
-        None if key.len() > 16 => format!("{}…{}", &key[..8], &key[key.len() - 4..]),
-        None => key.to_owned(),
-    }
-}
+pub use cpasfait_core::crypto::short_key;
 
 /// Parse a remote spec (`gdrive:ID`, a Drive folder URL, or a directory made absolute).
 fn parse_remote(spec: &str) -> Result<RemoteConfig> {
