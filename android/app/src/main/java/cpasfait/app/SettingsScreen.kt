@@ -14,7 +14,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -40,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import cpasfait.core.CpasfaitException
+import cpasfait.core.MemberView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -161,8 +165,100 @@ fun SettingsScreen(model: Model) {
                         runCatching { model.core.members(tab.id) }.getOrElse { emptyList() }
                     }
                     Text("Members", style = MaterialTheme.typography.labelLarge)
+                    val me = remember { runCatching { model.core.publicKey() }.getOrNull() }
+                    var revoking by remember { mutableStateOf<MemberView?>(null) }
                     for (m in members.filter { it.active }) {
-                        Text("• ${m.name}", style = MaterialTheme.typography.bodyMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "• ${m.name}" + if (m.key == me) " (this phone)" else "",
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            if (m.key != me) {
+                                IconButton(onClick = { revoking = m }) { Icon(Icons.Default.Close, "Remove ${m.name}") }
+                            }
+                        }
+                    }
+                    revoking?.let { m ->
+                        Confirm(
+                            "Remove ${m.name}?",
+                            "They won't get the new changes (a new key is made at the next sync). " +
+                                "Also stop sharing the remote folder with them.",
+                            "Remove",
+                            onDismiss = { revoking = null },
+                        ) {
+                            revoking = null
+                            if (model.act { model.core.revoke(tab.id, m.key) }) model.message = "removed ${m.name}"
+                        }
+                    }
+
+                    var unsharing by remember { mutableStateOf(false) }
+                    OutlinedButton(onClick = { unsharing = true }) { Text("Stop syncing this tab") }
+                    if (unsharing) {
+                        Confirm(
+                            "Stop syncing \"${tab.name}\"?",
+                            "It stays on this phone, and on the other devices and the remote as it is now. " +
+                                "To sync it again, share it again or join it.",
+                            "Stop",
+                            onDismiss = { unsharing = false },
+                        ) {
+                            unsharing = false
+                            if (model.act { model.core.setRemote(tab.id, null) }) model.message = "no longer synced"
+                        }
+                    }
+
+                    var moveTo by remember(tab.id) { mutableStateOf("") }
+                    var moving by remember { mutableStateOf(false) }
+                    Field(moveTo, { moveTo = it }, "Move the tab to another remote", if (moving) "Moving…" else "Move") {
+                        if (moving || moveTo.isBlank()) return@Field
+                        moving = true
+                        scope.launch {
+                            try {
+                                val n = withContext(Dispatchers.IO) {
+                                    SftpProvider(model.keys).use { model.app.syncCore.moveTab(tab.id, moveTo.trim(), it) }
+                                }
+                                model.reload()
+                                model.message = "moved ($n files copied); the other devices are asked to follow"
+                                moveTo = ""
+                            } catch (e: CpasfaitException) {
+                                model.report(e)
+                            } finally {
+                                moving = false
+                            }
+                        }
+                    }
+                }
+
+                Text("Priority of new tasks", style = MaterialTheme.typography.labelLarge)
+                val prio = remember(tab.id, model.generation) {
+                    runCatching { model.core.defaultPriority(tab.id) }.getOrDefault(0L)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (p in -3L..3L) {
+                        FilterChip(
+                            selected = prio == p,
+                            onClick = { model.act { model.core.setDefaultPriority(tab.id, if (p == 0L) null else p) } },
+                            label = { Text(if (p > 0) "+$p" else "$p") },
+                        )
+                    }
+                }
+
+                var deleting by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { deleting = true }) {
+                    Text("Delete this tab", color = MaterialTheme.colorScheme.error)
+                }
+                if (deleting) {
+                    Confirm(
+                        "Delete \"${tab.name}\"?",
+                        if (tab.remote != null) "It is deleted for everyone sharing it." else "Its tasks are deleted.",
+                        "Delete",
+                        onDismiss = { deleting = false },
+                    ) {
+                        deleting = false
+                        if (model.act { model.core.deleteTab(tab.id) }) {
+                            model.message = "deleted ${tab.name}"
+                            model.screen = Screen.Tasks
+                        }
                     }
                 }
             }
@@ -174,6 +270,17 @@ fun SettingsScreen(model: Model) {
             )
         }
     }
+}
+
+@Composable
+private fun Confirm(title: String, text: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

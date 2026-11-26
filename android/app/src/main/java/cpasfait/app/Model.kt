@@ -19,7 +19,12 @@ sealed interface Screen {
     data object Tasks : Screen
     data class Task(val id: String) : Screen
     data object Settings : Screen
+    data object Search : Screen
+    data object Time : Screen
 }
+
+/** A message for the user, with an action (Undo...). */
+data class Notice(val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
 
 /** The name the core gives when there is no `$USER` (as on Android). */
 private const val DEFAULT_USER = "me"
@@ -31,17 +36,28 @@ class Model(val app: CpasfaitApp) {
 
     var tabs by mutableStateOf(listOf<TabView>())
         private set
-    var tabId by mutableStateOf<String?>(null)
+    var tabId by mutableStateOf<String?>(app.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE).getString("tab", null))
         private set
     var rows by mutableStateOf(listOf<RowView>())
         private set
-    var collapsed by mutableStateOf(setOf<String>())
-    var hideDone by mutableStateOf(true)
+    private val prefs = app.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+
+    /** Folded tasks (all tabs), remembered across restarts. */
+    var collapsed by mutableStateOf(prefs.getStringSet("collapsed", emptySet())!!.toSet())
+        private set
+    var hideDone by mutableStateOf(prefs.getBoolean("hideDone", true))
         private set
     var active by mutableStateOf<SessionView?>(null)
         private set
     var screen by mutableStateOf<Screen>(Screen.Tasks)
-    var message by mutableStateOf<String?>(null)
+    var notice by mutableStateOf<Notice?>(null)
+
+    /** A plain message (errors, results). */
+    var message: String?
+        get() = notice?.text
+        set(v) {
+            notice = v?.let { Notice(it) }
+        }
     /** No name set yet (first start). */
     var askName by mutableStateOf(runCatching { app.core.user() == DEFAULT_USER }.getOrDefault(false))
     var syncing by mutableStateOf(false)
@@ -78,13 +94,33 @@ class Model(val app: CpasfaitApp) {
 
     fun selectTab(id: String) {
         tabId = id
-        collapsed = emptySet()
+        prefs.edit().putString("tab", id).apply()
         reload()
     }
 
     fun toggleHideDone() {
         hideDone = !hideDone
+        prefs.edit().putBoolean("hideDone", hideDone).apply()
         reload()
+    }
+
+    fun toggleFolded(id: String) {
+        collapsed = if (id in collapsed) collapsed - id else collapsed + id
+        prefs.edit().putStringSet("collapsed", collapsed).apply()
+    }
+
+    /** Show `task` (in its tab, unfolded). */
+    fun open(task: String) {
+        val tab = runCatching { core.task(task).tab }.getOrNull() ?: return
+        if (tab != tabId) selectTab(tab)
+        screen = Screen.Task(task)
+    }
+
+    /** Delete `task`, offering to undo it. */
+    fun delete(task: String, title: String) {
+        if (act { core.deleteTask(task) }) {
+            notice = Notice("deleted \"$title\"", "Undo") { act { core.undeleteTask(task) } }
+        }
     }
 
     fun report(e: Throwable) {

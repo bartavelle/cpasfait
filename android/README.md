@@ -16,13 +16,18 @@ Or open this directory in Android Studio.
 
 ## What it does
 
-- Tabs, the task tree (fold with the arrows), done boxes, a ▶/■ timer per task.
+- Tabs, the task tree (fold with the arrows, remembered), done boxes, a ▶/■
+  timer per task. Search (all tabs), "What's next?", time spent (today,
+  this week… per tab and task).
 - Task screen: title, notes, priority, due date (`fri 9:00`, `17:30`…),
-  tags, subtasks, the work log.
-- Settings: your name and email, this phone's keys, joining a shared tab,
-  sharing / inviting.
+  tags, subtasks, requirements; menu: indent / outdent, move under another
+  task, move to another tab (with subtasks and work log), delete (with undo).
+  Work log: tap a session to correct or delete it, "Log time" to add one.
+- Settings: your name and email, this phone's keys, joining a shared tab;
+  for the current tab: name, sharing, inviting and removing members, moving
+  it to another remote, stopping its sync, default priority, deleting it.
 - Sync on start, a few seconds after edits, and every 15 minutes in the
-  background; notifications when tasks fall due.
+  background. Due notifications on time, with "Done" and "In 1 hour".
 
 ## Remotes
 

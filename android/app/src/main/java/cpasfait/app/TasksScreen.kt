@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -36,7 +37,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -99,9 +102,22 @@ fun TasksScreen(model: Model) {
                             Icon(Icons.Default.Sync, "Sync")
                         }
                     }
+                    IconButton(onClick = { model.screen = Screen.Search }) { Icon(Icons.Default.Search, "Search") }
                     var menu by remember { mutableStateOf(false) }
                     IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("What's next?") },
+                            onClick = {
+                                menu = false
+                                val next = model.tabId?.let { runCatching { model.core.nextTask(it) }.getOrNull() }
+                                if (next != null) model.open(next) else model.message = "nothing to do in this tab"
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Time spent") },
+                            onClick = { menu = false; model.screen = Screen.Time },
+                        )
                         DropdownMenuItem(
                             text = { Text(if (model.hideDone) "Show done tasks" else "Hide done tasks") },
                             onClick = { menu = false; model.toggleHideDone() },
@@ -158,11 +174,15 @@ fun TasksScreen(model: Model) {
 
 @Composable
 fun MessageSnackbar(model: Model, snackbar: SnackbarHostState) {
-    LaunchedEffect(model.message) {
-        model.message?.let {
-            snackbar.showSnackbar(it)
-            model.message = null
-        }
+    LaunchedEffect(model.notice) {
+        val n = model.notice ?: return@LaunchedEffect
+        val res = snackbar.showSnackbar(
+            n.text,
+            actionLabel = n.action,
+            duration = if (n.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
+        )
+        if (res == SnackbarResult.ActionPerformed) n.onAction?.invoke()
+        if (model.notice === n) model.notice = null
     }
 }
 
@@ -229,9 +249,7 @@ private fun TaskRow(model: Model, r: RowView) {
     ) {
         if (r.hasChildren) {
             val folded = r.id in model.collapsed
-            IconButton(onClick = {
-                model.collapsed = if (folded) model.collapsed - r.id else model.collapsed + r.id
-            }) {
+            IconButton(onClick = { model.toggleFolded(r.id) }) {
                 Icon(
                     if (folded) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowDown,
                     if (folded) "Unfold" else "Fold",

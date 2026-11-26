@@ -49,25 +49,35 @@ object Dues {
         val open = PendingIntent.getActivity(
             app, 0, Intent(app, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
-        fun post(id: Int, title: String, text: String) {
-            nm.notify(
-                id,
-                NotificationCompat.Builder(app, CHANNEL)
-                    .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                    .setContentTitle(title)
-                    .setContentText(text)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                    .setContentIntent(open)
-                    .setAutoCancel(true)
-                    .build(),
-            )
+        fun post(id: Int, title: String, text: String, task: String?) {
+            val b = NotificationCompat.Builder(app, CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+            if (task != null) {
+                for ((action, label) in listOf(DueAction.DONE to "Done", DueAction.SNOOZE to "In 1 hour")) {
+                    val intent = Intent(app, DueAction::class.java)
+                        .setAction(action)
+                        .putExtra(DueAction.TASK, task)
+                        .putExtra(DueAction.NOTIFICATION, id)
+                    val pi = PendingIntent.getBroadcast(
+                        app, (task + action).hashCode(), intent,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                    b.addAction(0, label, pi)
+                }
+            }
+            nm.notify(id, b.build())
         }
         if (notices.size > MAX_SEPARATE) {
-            post(0, "${notices.size} tasks are due", notices.take(10).joinToString("\n") { "${it.title} (${it.due})" })
+            post(0, "${notices.size} tasks are due", notices.take(10).joinToString("\n") { "${it.title} (${it.due})" }, null)
         } else {
-            for (n in notices) post(n.task.hashCode(), "Due: ${n.title}", "${n.due} · ${n.tabName}")
+            for (n in notices) post(n.task.hashCode(), "Due: ${n.title}", "${n.due} · ${n.tabName}", n.task)
         }
     }
 
@@ -107,5 +117,35 @@ class BootReceiver : BroadcastReceiver() {
             Dues.check(app)
             Dues.schedule(app)
         }
+    }
+}
+
+/** The buttons of a due notification: mark the task done, or due again in an hour. */
+class DueAction : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val app = context.applicationContext as CpasfaitApp
+        val task = intent.getStringExtra(TASK) ?: return
+        app.getSystemService(NotificationManager::class.java).cancel(intent.getIntExtra(NOTIFICATION, 0))
+        try {
+            when (intent.action) {
+                DONE -> app.core.setDone(task, true)
+                SNOOZE -> {
+                    val at = java.time.LocalDateTime.now().plusHours(1).withSecond(0).withNano(0)
+                    app.core.setDue(task, at.toString().replace('T', ' '))
+                }
+            }
+        } catch (e: Exception) {
+            CpasfaitApp.log("due action", e)
+            return
+        }
+        app.model.reload()
+        app.edited()
+    }
+
+    companion object {
+        const val DONE = "cpasfait.app.DONE"
+        const val SNOOZE = "cpasfait.app.SNOOZE"
+        const val TASK = "task"
+        const val NOTIFICATION = "notification"
     }
 }

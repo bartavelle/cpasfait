@@ -343,11 +343,13 @@ fn session_view(s: &Session, me: &str) -> SessionView {
     }
 }
 
-fn dep_view(d: &cpasfait_core::DepInfo) -> DepView {
+/// `own_tab`: the tab of the task whose dependency this is (its name is
+/// only given for tasks elsewhere).
+fn dep_view(d: &cpasfait_core::DepInfo, own_tab: TabId) -> DepView {
     DepView {
         task: d.task.to_string(),
         title: d.title.clone(),
-        tab_name: d.tab_name.clone(),
+        tab_name: if d.tab == Some(own_tab) { None } else { d.tab_name.clone() },
         state: match d.state {
             DepState::Todo => DepStateView::Todo,
             DepState::Done => DepStateView::Done,
@@ -561,8 +563,8 @@ impl Cpasfait {
             score_blocking: score.blocking,
             worked_ms: sessions.iter().map(|s| s.duration_ms(now)).sum(),
             sessions: sessions.iter().map(|s| session_view(s, &me)).collect(),
-            requires: deps.requires.iter().map(dep_view).collect(),
-            blocks: deps.blocks.iter().map(dep_view).collect(),
+            requires: deps.requires.iter().map(|d| dep_view(d, t.tab)).collect(),
+            blocks: deps.blocks.iter().map(|d| dep_view(d, t.tab)).collect(),
         })
     }
 

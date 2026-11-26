@@ -70,14 +70,31 @@ impl RemoteBackend for LocalDir {
             f.write_all(data)?;
             f.sync_all()?;
         }
-        // hard_link fails if the target exists: atomic create-only publish.
-        let res = fs::hard_link(&tmp, &target);
+        let res = publish(&tmp, &target, |a, b| fs::hard_link(a, b));
         let _ = fs::remove_file(&tmp);
         match res {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(Error::AlreadyExists(path.to_owned())),
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+/// Give the written file `tmp` its name `target`, unless that exists.
+/// `link` (a hard link) fails if the target exists: an atomic create-only
+/// publish. Where hard links are refused (Android app storage, FAT/exFAT
+/// cards), check then rename: another writer could slip in between, but
+/// names are unique per device, so only the same device could race itself.
+fn publish(tmp: &Path, target: &Path, link: impl Fn(&Path, &Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    use std::io::ErrorKind;
+    match link(tmp, target) {
+        Err(e) if matches!(e.kind(), ErrorKind::PermissionDenied | ErrorKind::Unsupported) => {
+            if target.exists() {
+                return Err(ErrorKind::AlreadyExists.into());
+            }
+            fs::rename(tmp, target)
+        }
+        other => other,
     }
 }
 
@@ -95,5 +112,21 @@ mod tests {
         assert_eq!(b.list("nothing").unwrap(), Vec::<String>::new());
         assert_eq!(b.get("t/ops/d/1.jsonl").unwrap(), b"hello");
         assert!(b.get("../x").is_err());
+    }
+
+    /// Where hard links are refused, files are still published, once.
+    #[test]
+    fn without_hard_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tmp, target) = (dir.path().join(".tmp"), dir.path().join("f"));
+        let refuse = |_: &Path, _: &Path| Err(std::io::ErrorKind::PermissionDenied.into());
+        fs::write(&tmp, b"one").unwrap();
+        publish(&tmp, &target, refuse).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"one");
+        assert!(!tmp.exists());
+        fs::write(&tmp, b"two").unwrap();
+        let e = publish(&tmp, &target, refuse).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&target).unwrap(), b"one");
     }
 }

@@ -84,5 +84,13 @@ fun App(model: Model) {
             BackHandler { model.screen = Screen.Tasks }
             SettingsScreen(model)
         }
+        Screen.Search -> {
+            BackHandler { model.screen = Screen.Tasks }
+            SearchScreen(model)
+        }
+        Screen.Time -> {
+            BackHandler { model.screen = Screen.Tasks }
+            TimeScreen(model)
+        }
     }
 }
