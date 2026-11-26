@@ -613,3 +613,32 @@ fn due_notices() {
     assert_eq!(shown[0].summary, "Due: later");
     assert_eq!(shown[0].body, "2026-11-26 · work");
 }
+
+#[test]
+fn sessions_edited_by_hand() {
+    let (mut r, time) = repo_with_clock();
+    let now = time.load(Ordering::SeqCst);
+    let min = 60_000;
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    let s = r.add_session(a, now - 60 * min, now - 30 * min).unwrap();
+    assert!(r.add_session(a, now - 10 * min, now + min).is_err(), "future");
+    assert!(r.add_session(a, now - 10 * min, now - 20 * min).is_err(), "backwards");
+    assert_eq!(r.sessions_for_task(a).unwrap().len(), 1);
+    assert_eq!(r.session(s).unwrap().device, Some(r.device()));
+
+    r.set_session_span(s, now - 50 * min, Some(now - 20 * min)).unwrap();
+    let got = r.session(s).unwrap();
+    assert_eq!((got.start, got.end), (Some(now - 50 * min), Some(now - 20 * min)));
+    assert!(
+        r.set_session_span(s, now - 50 * min, None).is_err(),
+        "only the running one has no end"
+    );
+
+    let running = r.start_work(a).unwrap();
+    r.set_session_span(running, now - 5 * min, None).unwrap();
+    assert_eq!(r.session(running).unwrap().end, None);
+
+    r.delete_session(s).unwrap();
+    assert_eq!(r.sessions_for_task(a).unwrap().len(), 1);
+}

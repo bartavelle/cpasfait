@@ -1328,6 +1328,55 @@ impl Repo {
         self.edit1(s.tab, session, Change::SessionNote(note.to_owned()))
     }
 
+    /// Log time spent on `task` after the fact: a finished session of this
+    /// device, from `start` to `end` (Unix ms, not in the future).
+    pub fn add_session(&mut self, task: TaskId, start: i64, end: i64) -> Result<SessionId> {
+        Self::check_span(start, Some(end), self.now_ms())?;
+        let t = self.task(task)?;
+        let id = SessionId::new();
+        self.commit(vec![
+            (t.tab, id.0, Change::SessionTask(task)),
+            (t.tab, id.0, Change::SessionDevice(self.device)),
+            (t.tab, id.0, Change::SessionUser(self.user.clone())),
+            (t.tab, id.0, Change::SessionStart(start)),
+            (t.tab, id.0, Change::SessionEnd(Some(end))),
+        ])?;
+        Ok(id)
+    }
+
+    /// Correct a session's times. Only a running session can stay without
+    /// an end (`end: None`); giving it one stops it.
+    pub fn set_session_span(&mut self, id: SessionId, start: i64, end: Option<i64>) -> Result<()> {
+        let s = self.session(id)?;
+        if end.is_none() && s.end.is_some() {
+            return Err(Error::Invalid("only the running session can have no end".into()));
+        }
+        Self::check_span(start, end, self.now_ms())?;
+        let mut edits = vec![];
+        if s.start != Some(start) {
+            edits.push((s.tab, id.0, Change::SessionStart(start)));
+        }
+        if s.end != end {
+            edits.push((s.tab, id.0, Change::SessionEnd(end)));
+        }
+        self.commit(edits)
+    }
+
+    pub fn delete_session(&mut self, id: SessionId) -> Result<()> {
+        let s = self.session(id)?;
+        self.edit1(s.tab, id, Change::SessionDeleted(true))
+    }
+
+    fn check_span(start: i64, end: Option<i64>, now: i64) -> Result<()> {
+        if end.is_some_and(|e| e <= start) {
+            return Err(Error::Invalid("the session ends before it starts".into()));
+        }
+        if start > now || end.is_some_and(|e| e > now) {
+            return Err(Error::Invalid("that is in the future".into()));
+        }
+        Ok(())
+    }
+
     pub fn session(&self, id: SessionId) -> Result<Session> {
         self.conn
             .query_row(

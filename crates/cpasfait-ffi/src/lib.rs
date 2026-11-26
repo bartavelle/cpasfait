@@ -275,10 +275,46 @@ pub struct Joined {
     pub waiting_for_invitation: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SearchHit {
+    pub task: String,
+    pub tab: String,
+    pub tab_name: String,
+    pub title: String,
+    /// Its ancestors' titles, from the top (`Home › Kitchen`), empty at the top.
+    pub path: String,
+    /// Done, or under a done task.
+    pub done: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ReportLine {
+    /// None: the time on deleted tasks.
+    pub task: Option<String>,
+    pub title: String,
+    pub depth: u32,
+    /// On this task itself.
+    pub own_ms: i64,
+    /// With its subtasks.
+    pub total_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ReportTab {
+    pub tab: String,
+    pub name: String,
+    pub total_ms: i64,
+    pub lines: Vec<ReportLine>,
+}
+
 // ------------------------------------------------------------------ conversions
 
 fn task_id(s: &str) -> Res<TaskId> {
     s.parse().map_err(|_| failed(format!("bad task id {s:?}")))
+}
+
+fn session_id(s: &str) -> Res<cpasfait_core::SessionId> {
+    s.parse().map_err(|_| failed(format!("bad session id {s:?}")))
 }
 
 fn tab_id(s: &str) -> Res<TabId> {
@@ -530,6 +566,50 @@ impl Cpasfait {
         })
     }
 
+    /// The task to do next in `tab`: the most prioritary actionable one.
+    pub fn next_task(&self, tab: String) -> Res<Option<String>> {
+        Ok(self.repo().next_task(tab_id(&tab)?)?.map(|t| t.id.to_string()))
+    }
+
+    /// Tasks of all tabs whose title or ancestors contain all the words of
+    /// `query` (any case), open ones first, at most `limit`.
+    pub fn search(&self, query: String, limit: u32) -> Res<Vec<SearchHit>> {
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        if words.is_empty() {
+            return Ok(vec![]);
+        }
+        let repo = self.repo();
+        let mut hits = vec![];
+        for tab in repo.tabs()? {
+            let tree = repo.tree(tab.id)?;
+            for t in tree.iter() {
+                let path = tree.path(t.id);
+                let haystack = path.join(" ").to_lowercase();
+                if !words.iter().all(|w| haystack.contains(w.as_str())) {
+                    continue;
+                }
+                let in_title = words
+                    .iter()
+                    .filter(|w| t.title.to_lowercase().contains(w.as_str()))
+                    .count();
+                hits.push((
+                    tree.is_effectively_done(t.id),
+                    std::cmp::Reverse(in_title),
+                    SearchHit {
+                        task: t.id.to_string(),
+                        tab: tab.id.to_string(),
+                        tab_name: tab.name.clone(),
+                        title: t.title.clone(),
+                        path: path[..path.len() - 1].join(" › "),
+                        done: tree.is_effectively_done(t.id),
+                    },
+                ));
+            }
+        }
+        hits.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then_with(|| a.2.title.cmp(&b.2.title)));
+        Ok(hits.into_iter().take(limit as usize).map(|h| h.2).collect())
+    }
+
     pub fn add_task(&self, tab: String, place: PlaceArg, title: String) -> Res<String> {
         Ok(self
             .repo()
@@ -631,10 +711,53 @@ impl Cpasfait {
     }
 
     pub fn set_session_note(&self, session: String, note: String) -> Res<()> {
-        let id = session
-            .parse()
-            .map_err(|_| failed(format!("bad session id {session:?}")))?;
-        Ok(self.repo().set_session_note(id, &note)?)
+        Ok(self.repo().set_session_note(session_id(&session)?, &note)?)
+    }
+
+    /// Log time spent on `task` after the fact (Unix ms, not in the future).
+    /// Returns the new session.
+    pub fn add_session(&self, task: String, start: i64, end: i64) -> Res<String> {
+        Ok(self.repo().add_session(task_id(&task)?, start, end)?.to_string())
+    }
+
+    /// Correct a session's times; `end`: None only for the running session.
+    pub fn set_session_span(&self, session: String, start: i64, end: Option<i64>) -> Res<()> {
+        Ok(self.repo().set_session_span(session_id(&session)?, start, end)?)
+    }
+
+    pub fn delete_session(&self, session: String) -> Res<()> {
+        Ok(self.repo().delete_session(session_id(&session)?)?)
+    }
+
+    /// Time spent in `[from, to)` (Unix ms), per tab and task, totals rolled
+    /// up through subtasks. `tab`: only that one.
+    pub fn time_report(&self, from: i64, to: i64, tab: Option<String>) -> Res<Vec<ReportTab>> {
+        use cpasfait_core::report;
+        let repo = self.repo();
+        let filter = report::Filter {
+            tab: tab.as_deref().map(tab_id).transpose()?,
+            user: None,
+        };
+        let slices = report::slices(&repo, from, to, &filter)?;
+        Ok(report::by_task(&repo, &slices)?
+            .into_iter()
+            .map(|t| ReportTab {
+                tab: t.tab.to_string(),
+                name: t.name,
+                total_ms: t.total_ms,
+                lines: t
+                    .lines
+                    .into_iter()
+                    .map(|l| ReportLine {
+                        task: l.task.map(|t| t.to_string()),
+                        title: l.title,
+                        depth: l.depth as u32,
+                        own_ms: l.own_ms,
+                        total_ms: l.total_ms,
+                    })
+                    .collect(),
+            })
+            .collect())
     }
 
     // -------------------------------------------------------------- due dates
@@ -714,6 +837,60 @@ impl Cpasfait {
         }
         let name = name.unwrap_or_else(|| cpasfait_core::crypto::short_key(&key));
         Ok(repo.set_member(tab, &key, Some(&name))?)
+    }
+
+    /// Remove a member (by key): they no longer get the new changes (a new
+    /// key is made at the next sync). Stop sharing the remote with them too.
+    pub fn revoke(&self, tab: String, key: String) -> Res<()> {
+        let tab = tab_id(&tab)?;
+        let mut repo = self.repo();
+        let active: Vec<_> = repo.members(tab)?.into_iter().filter(|m| m.active).collect();
+        if !active.iter().any(|m| m.recipient == key) {
+            return Err(failed("not a member"));
+        }
+        if active.len() == 1 {
+            return Err(failed("that is the last member"));
+        }
+        Ok(repo.set_member(tab, &key, None)?)
+    }
+
+    /// Priority given to the tab's new tasks.
+    pub fn default_priority(&self, tab: String) -> Res<i64> {
+        Ok(self.repo().tab_settings(tab_id(&tab)?)?.default_priority)
+    }
+
+    /// None: back to the default (0).
+    pub fn set_default_priority(&self, tab: String, priority: Option<i64>) -> Res<()> {
+        let value = priority.map(|p| p.to_string());
+        Ok(self
+            .repo()
+            .set_tab_setting(tab_id(&tab)?, "default_priority", value.as_deref())?)
+    }
+
+    /// Move a shared tab to another remote, for everyone: copies its files
+    /// there and switches to it; the other devices are asked to follow.
+    /// Returns the number of files copied. Slow: use the sync instance.
+    pub fn move_tab(&self, tab: String, spec: String, remotes: Option<Arc<dyn RemoteProvider>>) -> Res<u64> {
+        let tab = tab_id(&tab)?;
+        let old = self
+            .repo()
+            .tabs()?
+            .into_iter()
+            .find(|t| t.id == tab)
+            .and_then(|t| t.remote)
+            .ok_or_else(|| failed("this tab has no remote"))?;
+        let config = parse_remote(&spec)?;
+        if config == old {
+            return Err(failed("already there"));
+        }
+        let (from, to) = (
+            open_remote(&old, remotes.as_ref())?,
+            open_remote(&config, remotes.as_ref())?,
+        );
+        self.with_identity(|repo, me| {
+            let n = cpasfait_core::sync::move_tab(repo, tab, from.as_ref(), to.as_ref(), &config, me, &mut |_| {})?;
+            Ok(n as u64)
+        })
     }
 
     /// Join a shared tab at `spec`: `tab` if given, else the one new tab

@@ -134,6 +134,45 @@ fn app_api() {
     assert_eq!(app.upcoming_dues().unwrap().len(), 1);
     assert!(app.take_due_notices().unwrap().is_empty());
 
+    // Search, next task.
+    let hits = app.search("kitchen".into(), 10).unwrap();
+    assert!(hits.is_empty());
+    let hits = app.search("PAINT".into(), 10).unwrap();
+    assert_eq!(
+        hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(),
+        vec!["Paint", "Walls"]
+    );
+    assert_eq!(hits[1].path, "Paint");
+    assert!(hits[1].done);
+    assert_eq!(app.search("walls paint".into(), 10).unwrap().len(), 1);
+    assert_eq!(app.next_task(tab.clone()).unwrap(), Some(report.clone()));
+
+    // Work log by hand, time report.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let hour = 3_600_000;
+    let logged = app.add_session(walls.clone(), now - 3 * hour, now - 2 * hour).unwrap();
+    assert!(app.add_session(walls.clone(), now, now + hour).is_err());
+    app.set_session_span(logged.clone(), now - 4 * hour, Some(now - 2 * hour))
+        .unwrap();
+    app.set_session_note(logged.clone(), "first coat".into()).unwrap();
+    let report_tabs = app.time_report(now - 24 * hour, now, None).unwrap();
+    assert_eq!(report_tabs.len(), 1);
+    let paint_line = report_tabs[0].lines.iter().find(|l| l.title == "Paint").unwrap();
+    assert_eq!((paint_line.own_ms, paint_line.total_ms), (0, 2 * hour));
+    assert!(app.time_report(now - 24 * hour, now, Some(tab.clone())).unwrap()[0].total_ms >= 2 * hour);
+    app.delete_session(logged).unwrap();
+    assert!(app.task(walls.clone()).unwrap().sessions.is_empty());
+
+    // Tab settings.
+    assert_eq!(app.default_priority(tab.clone()).unwrap(), 0);
+    app.set_default_priority(tab.clone(), Some(1)).unwrap();
+    assert_eq!(app.default_priority(tab.clone()).unwrap(), 1);
+    app.set_default_priority(tab.clone(), None).unwrap();
+    assert_eq!(app.default_priority(tab.clone()).unwrap(), 0);
+
     // Sharing through a remote the app provides.
     let remote_dir = tmp.path().join("frolic");
     let provider = Arc::new(Provider {
@@ -159,6 +198,9 @@ fn app_api() {
         .unwrap();
     assert!(app.invite(tab.clone(), other_key.recipient().into(), None).is_err());
     assert_eq!(app.members(tab.clone()).unwrap().len(), 2);
+    assert!(app.revoke(tab.clone(), "age1nobody".into()).is_err());
+    assert!(app.revoke(tab.clone(), key.clone()).is_ok(), "not the last member");
+    app.invite(tab.clone(), key.clone(), Some("me".into())).unwrap();
     bg.sync(Some(remotes.clone())).unwrap();
     let mut laptop = Repo::open_in_memory().unwrap();
     let tab_id = tab.parse().unwrap();
@@ -195,10 +237,24 @@ fn app_api() {
         vec!["inbox", "work"]
     );
     assert!(
-        app.join_tab("rsync:me@frolic:perso".into(), None, Some(remotes))
+        app.join_tab("rsync:me@frolic:perso".into(), None, Some(remotes.clone()))
             .is_err(),
         "nothing new"
     );
+
+    // Moving the tab to another remote.
+    let elsewhere = tmp.path().join("elsewhere");
+    assert_eq!(
+        bg.move_tab(tab.clone(), "rsync:me@frolic:perso".into(), Some(remotes.clone()))
+            .map_err(|e| e.to_string()),
+        Err("already there".into())
+    );
+    assert!(
+        bg.move_tab(tab.clone(), elsewhere.display().to_string(), Some(remotes.clone()))
+            .unwrap()
+            > 0
+    );
+    assert_eq!(app.tabs().unwrap()[0].remote, Some(elsewhere.display().to_string()));
 
     // Without a provider: directories (here) work; rsync: would run rsync.
     app.set_remote(second.to_string(), None).unwrap();
