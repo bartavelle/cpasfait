@@ -333,7 +333,7 @@ fn render_tree(f: &mut Frame, app: &App, state: &mut ListState, area: Rect) -> u
     inner.height as usize
 }
 
-fn fmt_time(ms: i64) -> String {
+pub fn fmt_time(ms: i64) -> String {
     match jiff::Timestamp::from_millisecond(ms) {
         Ok(ts) => ts
             .to_zoned_datetime(jiff::tz::TimeZone::system())
@@ -464,8 +464,30 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
     }
     lines.push(Line::raw(""));
     if !t.notes.is_empty() {
-        lines.push(Line::from("notes".underlined()));
+        lines.push(Line::from("description".underlined()));
         lines.extend(t.notes.lines().map(|l| Line::raw(l.to_owned())));
+        lines.push(Line::raw(""));
+    }
+    if !app.detail_notes.is_empty() {
+        lines.push(Line::from("notes".underlined()));
+        for n in app.detail_notes.iter().take(DETAIL_NOTES) {
+            lines.push(Line::from(vec![
+                Span::raw(fmt_time(n.at)).dim(),
+                Span::raw(" "),
+                Span::styled(n.author.name.clone(), Style::new().fg(Color::Magenta)),
+            ]));
+            lines.extend(n.text.lines().map(|l| Line::raw(format!("  {l}"))));
+        }
+        let older = app.detail_notes.len().saturating_sub(DETAIL_NOTES);
+        if older > 0 {
+            lines.push(Line::from(
+                format!(
+                    "… {older} older note{}, :notes to see them",
+                    if older > 1 { "s" } else { "" }
+                )
+                .dim(),
+            ));
+        }
         lines.push(Line::raw(""));
     }
     // Totals, then the latest sessions (the log of an always-running task
@@ -531,6 +553,9 @@ pub fn dep_problem(state: DepState) -> Option<&'static str> {
         DepState::UnknownTab => Some("in a tab you don't have"),
     }
 }
+
+/// Notes shown in the detail pane (the latest ones).
+const DETAIL_NOTES: usize = 5;
 
 /// Sessions listed in the detail pane (the latest ones).
 const DETAIL_SESSIONS: usize = 8;

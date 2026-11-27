@@ -1047,3 +1047,23 @@ fn tab_completion() {
     assert_eq!(cmdline(&app), "tabremote rsync:me@host:dir");
     press(&mut app, "<esc>");
 }
+
+#[test]
+fn notes_on_tasks() {
+    let (mut app, _) = app();
+    press(&mut app, "nreport<esc>");
+    press(&mut app, ":notes<enter>");
+    assert!(message(&app).contains("no notes"), "{}", message(&app));
+    press(&mut app, "N");
+    assert_eq!(cmdline(&app), "note ");
+    press(&mut app, "sent the draft to Bob<enter>");
+    press(&mut app, ":note<enter>");
+    let task = app.selected().unwrap();
+    assert_eq!(app.requests, vec![crate::app::Request::NewNote(task)]);
+    app.requests.clear();
+    assert_eq!(app.detail_notes.len(), 1);
+    let s = screen(&mut app, 100, 20);
+    assert!(s.contains("notes") && s.contains("  sent the draft to Bob"), "{s}");
+    press(&mut app, ":notes<enter>");
+    assert_eq!(app.requests, vec![crate::app::Request::EditNoteList(task)]);
+}

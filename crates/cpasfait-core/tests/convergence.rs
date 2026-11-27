@@ -50,6 +50,12 @@ enum Action {
     Stop {
         dev: usize,
     },
+    Note {
+        dev: usize,
+        task: usize,
+        /// Edit (or delete, when empty) the latest note instead.
+        edit: Option<u8>,
+    },
     Exchange {
         from: usize,
         to: usize,
@@ -72,6 +78,7 @@ fn action() -> impl Strategy<Value = Action> {
         1 => (dev.clone(), idx.clone(), idx.clone(), any::<bool>()).prop_map(|(dev, task, blocker, on)| Action::Require { dev, task, blocker, on }),
         1 => (dev.clone(), idx.clone()).prop_map(|(dev, task)| Action::Work { dev, task }),
         1 => dev.clone().prop_map(|dev| Action::Stop { dev }),
+        1 => (dev.clone(), idx.clone(), proptest::option::of(0u8..4)).prop_map(|(dev, task, edit)| Action::Note { dev, task, edit }),
         2 => (dev.clone(), dev.clone()).prop_map(|(from, to)| Action::Exchange { from, to }),
         1 => (-5i64..50).prop_map(Action::Tick),
     ]
@@ -166,6 +173,20 @@ fn run(actions: Vec<Action>) -> Result<(), TestCaseError> {
             }
             Action::Stop { dev } => {
                 repos[dev].stop_work().unwrap();
+            }
+            Action::Note { dev, task, edit } => {
+                if let Some(t) = pick(&repos[dev], tab, task) {
+                    let r = &mut repos[dev];
+                    match (edit, r.notes_for_task(t).unwrap().first()) {
+                        (Some(e), Some(n)) => {
+                            let text = if e == 0 { String::new() } else { format!("edit {e}") };
+                            r.set_note_text(n.id, &text).unwrap();
+                        }
+                        _ => {
+                            r.add_note(t, "status").unwrap();
+                        }
+                    }
+                }
             }
             Action::Exchange { from, to } => {
                 if from != to {

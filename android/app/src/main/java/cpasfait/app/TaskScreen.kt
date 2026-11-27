@@ -44,11 +44,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cpasfait.core.DepStateView
 import cpasfait.core.DepView
+import cpasfait.core.NoteView
 import cpasfait.core.PlaceArg
 import cpasfait.core.SessionView
 import cpasfait.core.TaskDetail
@@ -81,6 +84,8 @@ private sealed interface Ask {
     data object Tab : Ask
     data object NewSession : Ask
     data class Session(val s: SessionView) : Ask
+    data object NewNote : Ask
+    data class Note(val n: NoteView) : Ask
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,7 +103,7 @@ fun TaskScreen(model: Model, id: String) {
         return
     }
     var title by remember(id) { mutableStateOf(detail.title) }
-    var notes by remember(id) { mutableStateOf(detail.notes) }
+    var description by remember(id) { mutableStateOf(detail.description) }
     var due by remember(id, detail.due) { mutableStateOf(detail.due ?: "") }
     var tags by remember(id, detail.tags) { mutableStateOf(detail.tags.joinToString(" ")) }
     var ask by remember { mutableStateOf<Ask?>(null) }
@@ -107,7 +112,7 @@ fun TaskScreen(model: Model, id: String) {
     fun save() {
         val d = runCatching { model.core.task(id) }.getOrNull() ?: return
         if (title.isNotBlank() && title.trim() != d.title) model.act { model.core.setTitle(id, title.trim()) }
-        if (notes != d.notes) model.act { model.core.setNotes(id, notes) }
+        if (description != d.description) model.act { model.core.setDescription(id, description) }
     }
     // Leaving the screen (back, another screen) keeps the edits.
     DisposableEffect(id) { onDispose { save() } }
@@ -163,7 +168,7 @@ fun TaskScreen(model: Model, id: String) {
                 OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Title") })
             }
             OutlinedTextField(
-                notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Notes") }, minLines = 3,
+                description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Description") }, minLines = 2,
             )
 
             Text("Priority", style = MaterialTheme.typography.labelLarge)
@@ -230,6 +235,21 @@ fun TaskScreen(model: Model, id: String) {
 
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Notes", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                TextButton(onClick = { ask = Ask.NewNote }) { Text("Add note") }
+            }
+            if (detail.notes.isEmpty()) {
+                Text("Status updates, dated and signed.", style = MaterialTheme.typography.bodySmall)
+            }
+            for (n in detail.notes) {
+                Column(Modifier.fillMaxWidth().clickable { ask = Ask.Note(n) }.padding(vertical = 4.dp)) {
+                    Text("${fmtTime(n.at)} · ${n.author}", style = MaterialTheme.typography.labelMedium)
+                    Text(n.text, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            HorizontalDivider()
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Work log  ${clock(detail.workedMs)}", Modifier.weight(1f), fontWeight = FontWeight.Bold)
                 TextButton(onClick = { ask = Ask.NewSession }) { Text("Log time") }
             }
@@ -282,6 +302,8 @@ fun TaskScreen(model: Model, id: String) {
         }
         Ask.NewSession -> SessionDialog(model, id, null) { ask = null }
         is Ask.Session -> SessionDialog(model, id, a.s) { ask = null }
+        Ask.NewNote -> NoteDialog(model, id, null) { ask = null }
+        is Ask.Note -> NoteDialog(model, id, a.n) { ask = null }
     }
 }
 
@@ -311,6 +333,51 @@ private fun Deps(model: Model, label: String, deps: List<DepView>, remove: ((Str
             }
         }
     }
+}
+
+/** A note: new (`n` null) or to fix. */
+@Composable
+private fun NoteDialog(model: Model, task: String, n: NoteView?, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(n?.text ?: "") }
+    val focus = remember { FocusRequester() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (n == null) "New note" else "Note") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (n != null) {
+                    Text("${fmtTime(n.at)} · ${n.author}", style = MaterialTheme.typography.bodySmall)
+                }
+                OutlinedTextField(
+                    text, { text = it }, Modifier.fillMaxWidth().focusRequester(focus),
+                    minLines = 3,
+                    placeholder = { Text("What's new?") },
+                )
+            }
+            LaunchedEffect(Unit) { focus.requestFocus() }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = text.isNotBlank(),
+                onClick = {
+                    val ok = model.act {
+                        if (n == null) model.core.addNote(task, text) else model.core.setNoteText(n.id, text)
+                    }
+                    if (ok) onDismiss()
+                },
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            Row {
+                if (n != null) {
+                    TextButton(onClick = {
+                        if (model.act { model.core.deleteNote(n.id) }) onDismiss()
+                    }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 /** A work session: new (`s` null: logged after the fact) or to correct. */

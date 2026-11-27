@@ -4,6 +4,7 @@ mod config;
 mod editor;
 mod fuzzy;
 mod keymap;
+mod notes;
 mod search;
 mod sync_worker;
 mod timebox;
@@ -161,6 +162,25 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
                     }
                     None => app.error("sync disabled (--no-sync)"),
                 },
+                Request::NewNote(task) => match run_editor(terminal, "", "md") {
+                    Ok(text) if text.trim().is_empty() => app.info("empty note: nothing added"),
+                    Ok(text) => {
+                        if let Err(e) = app
+                            .repo
+                            .add_note(task, &text)
+                            .map_err(anyhow::Error::from)
+                            .and_then(|_| app.refresh())
+                        {
+                            app.error(format!("{e:#}"));
+                        }
+                    }
+                    Err(e) => app.error(format!("{e:#}")),
+                },
+                Request::EditNoteList(task) => {
+                    if let Err(e) = edit_note_list(terminal, app, task) {
+                        app.error(format!("{e:#}"));
+                    }
+                }
                 Request::EditNotes(task) => {
                     if let Err(e) = edit_notes(terminal, app, task) {
                         app.error(format!("{e:#}"));
@@ -239,6 +259,26 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, worker: Option<&SyncWorker
             app.error(format!("{e:#}"));
         }
     }
+}
+
+/// `:notes`: the task's notes in the editor; apply what was changed.
+fn edit_note_list(terminal: &mut DefaultTerminal, app: &mut App, task: cpasfait_core::TaskId) -> Result<()> {
+    let title = app.repo.task(task)?.title;
+    let list = app.repo.notes_for_task(task)?;
+    let text = notes::render(&title, &list, ui::fmt_time);
+    let edited = run_editor(terminal, &text, "md")?;
+    let changes = notes::changes(&list, &edited)?;
+    let deleted = changes.iter().filter(|(_, t)| t.is_empty()).count();
+    let changed = changes.len() - deleted;
+    for (id, text) in changes {
+        app.repo.set_note_text(id, &text)?;
+    }
+    app.refresh()?;
+    app.info(match (changed, deleted) {
+        (0, 0) => "no changes".to_owned(),
+        _ => format!("{changed} note(s) changed, {deleted} deleted"),
+    });
+    Ok(())
 }
 
 fn edit_notes(terminal: &mut DefaultTerminal, app: &mut App, task: cpasfait_core::TaskId) -> Result<()> {

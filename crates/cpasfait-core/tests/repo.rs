@@ -233,7 +233,7 @@ fn upgrade_from_v1_replays_dependency_ops() {
     };
     {
         let c = rusqlite::Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; DROP TABLE due_notified; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; ALTER TABLE task DROP COLUMN author_name; ALTER TABLE task DROP COLUMN author_email; ALTER TABLE device DROP COLUMN email; PRAGMA user_version = 1;")
+        c.execute_batch("DROP TABLE task_dep; DROP TABLE tab_member; DROP TABLE tab_epoch; DROP TABLE key_file; DROP TABLE tab_setting; DROP TABLE due_notified; DROP TABLE note; ALTER TABLE tab DROP COLUMN move_id; ALTER TABLE tab DROP COLUMN move_remote; ALTER TABLE tab DROP COLUMN move_by; ALTER TABLE tab DROP COLUMN move_done; ALTER TABLE task DROP COLUMN author_name; ALTER TABLE task DROP COLUMN author_email; ALTER TABLE device DROP COLUMN email; PRAGMA user_version = 1;")
             .unwrap();
     }
     // The read-only open used by the companion tools migrates too.
@@ -482,6 +482,7 @@ fn move_a_task_to_another_tab() {
     time.fetch_add(30 * min, Ordering::SeqCst);
     let s = r.start_work(child).unwrap();
     r.set_session_note(s, "started").unwrap();
+    r.add_note(child, "waiting for review").unwrap();
     time.fetch_add(10 * min, Ordering::SeqCst);
     let total_before: i64 = report::slices(&r, 0, i64::MAX / 2, &Filter::default())
         .unwrap()
@@ -537,6 +538,10 @@ fn move_a_task_to_another_tab() {
     assert_eq!(p.blocked_by, vec![stays]);
     let new_child = tree_b.children(Some(moved.id))[0];
     let new_grandchild = tree_b.children(Some(new_child))[0];
+    let notes = r.notes_for_task(new_child).unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!((notes[0].text.as_str(), notes[0].tab), ("waiting for review", b));
+    assert!(r.notes_for_task(child).unwrap().is_empty());
     assert!(r.task(new_grandchild).unwrap().is_done());
     // a task left behind now requires the copy
     assert_eq!(r.task(waits).unwrap().blocked_by, vec![new_child]);
@@ -641,4 +646,33 @@ fn sessions_edited_by_hand() {
 
     r.delete_session(s).unwrap();
     assert_eq!(r.sessions_for_task(a).unwrap().len(), 1);
+}
+
+#[test]
+fn notes() {
+    let (mut r, time) = repo_with_clock();
+    r.set_user("alice").unwrap();
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    assert!(r.add_note(a, "  ").is_err());
+    let first = r.add_note(a, "asked Bob\n").unwrap();
+    time.fetch_add(60_000, Ordering::SeqCst);
+    let second = r.add_note(a, "Bob answered").unwrap();
+    let notes = r.notes_for_task(a).unwrap();
+    assert_eq!(
+        notes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(),
+        ["Bob answered", "asked Bob"],
+        "newest first, trimmed"
+    );
+    assert_eq!(notes[0].author.name, "alice");
+    assert_eq!(notes[0].at - notes[1].at, 60_000);
+    r.set_note_text(first, "asked Bob by mail").unwrap();
+    assert_eq!(r.note(first).unwrap().text, "asked Bob by mail");
+    r.set_note_text(second, "").unwrap();
+    assert_eq!(r.notes_for_task(a).unwrap().len(), 1);
+    assert_eq!(r.note_counts(tab).unwrap().get(&a), Some(&1));
+    // The read model is rebuilt identically from the ops.
+    let before = r.dump_model().unwrap();
+    r.rebuild().unwrap();
+    assert_eq!(r.dump_model().unwrap(), before);
 }

@@ -15,7 +15,7 @@ use cpasfait_core::backend::{self, RemoteBackend};
 use cpasfait_core::crypto::Identity;
 use cpasfait_core::model::DepState;
 use cpasfait_core::sync::{invited_to, remote_tabs, sync_tab};
-use cpasfait_core::{Place, RemoteConfig, Repo, Session, Status, TabId, TaskId};
+use cpasfait_core::{Note, Place, RemoteConfig, Repo, Session, Status, TabId, TaskId};
 use jiff::tz::TimeZone;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -176,7 +176,10 @@ pub struct RowView {
     pub due_ms: Option<i64>,
     pub tags: Vec<String>,
     pub score: i64,
-    pub has_notes: bool,
+    /// Has a description (free text).
+    pub has_description: bool,
+    /// Number of dated notes.
+    pub note_count: u32,
     /// Users working on it right now (open sessions).
     pub working: Vec<String>,
 }
@@ -192,6 +195,18 @@ pub struct SessionView {
     /// None while running.
     pub end: Option<i64>,
     pub note: String,
+}
+
+/// A dated note on a task (a status update).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct NoteView {
+    pub id: String,
+    /// Unix ms.
+    pub at: i64,
+    pub author: String,
+    /// Written by this user.
+    pub mine: bool,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -220,7 +235,10 @@ pub struct TaskDetail {
     pub tab: String,
     pub parent: Option<String>,
     pub title: String,
-    pub notes: String,
+    /// Free text about the task.
+    pub description: String,
+    /// Dated notes, newest first.
+    pub notes: Vec<NoteView>,
     pub done: bool,
     pub priority: i64,
     pub due: Option<String>,
@@ -317,6 +335,10 @@ fn session_id(s: &str) -> Res<cpasfait_core::SessionId> {
     s.parse().map_err(|_| failed(format!("bad session id {s:?}")))
 }
 
+fn note_id(s: &str) -> Res<cpasfait_core::NoteId> {
+    s.parse().map_err(|_| failed(format!("bad note id {s:?}")))
+}
+
 fn tab_id(s: &str) -> Res<TabId> {
     s.parse().map_err(|_| failed(format!("bad tab id {s:?}")))
 }
@@ -329,6 +351,16 @@ fn place(p: PlaceArg) -> Res<Place> {
         PlaceArg::Before { task } => Place::Before(task_id(&task)?),
         PlaceArg::After { task } => Place::After(task_id(&task)?),
     })
+}
+
+fn note_view(n: &Note, me: &str) -> NoteView {
+    NoteView {
+        id: n.id.to_string(),
+        at: n.at,
+        author: n.author.name.clone(),
+        mine: n.author.name == me,
+        text: n.text.clone(),
+    }
 }
 
 fn session_view(s: &Session, me: &str) -> SessionView {
@@ -506,6 +538,7 @@ impl Cpasfait {
         let repo = self.repo();
         let tree = repo.tree(tab)?;
         let scores = tree.scores();
+        let note_counts = repo.note_counts(tab)?;
         let mut working: HashMap<TaskId, Vec<String>> = HashMap::new();
         for s in repo.open_sessions(tab)? {
             if let Some(t) = s.task {
@@ -532,7 +565,8 @@ impl Cpasfait {
                     due_ms,
                     tags: t.tags.clone(),
                     score: scores.get(&t.id).map(|s| s.total()).unwrap_or_default(),
-                    has_notes: !t.notes.trim().is_empty(),
+                    has_description: !t.notes.trim().is_empty(),
+                    note_count: note_counts.get(&t.id).copied().unwrap_or(0),
                     working: working.remove(&t.id).unwrap_or_default(),
                 })
             })
@@ -555,7 +589,8 @@ impl Cpasfait {
             tab: t.tab.to_string(),
             parent: t.parent.map(|p| p.to_string()),
             title: t.title.clone(),
-            notes: t.notes.clone(),
+            description: t.notes.clone(),
+            notes: repo.notes_for_task(id)?.iter().map(|n| note_view(n, &me)).collect(),
             done: t.is_done(),
             priority: t.priority,
             due,
@@ -627,8 +662,22 @@ impl Cpasfait {
         Ok(self.repo().set_title(task_id(&task)?, &title)?)
     }
 
-    pub fn set_notes(&self, task: String, notes: String) -> Res<()> {
-        Ok(self.repo().set_notes(task_id(&task)?, &notes)?)
+    pub fn set_description(&self, task: String, text: String) -> Res<()> {
+        Ok(self.repo().set_notes(task_id(&task)?, &text)?)
+    }
+
+    /// Add a dated note (by this user, now). Returns its id.
+    pub fn add_note(&self, task: String, text: String) -> Res<String> {
+        Ok(self.repo().add_note(task_id(&task)?, &text)?.to_string())
+    }
+
+    /// Change a note's text (empty: delete it).
+    pub fn set_note_text(&self, note: String, text: String) -> Res<()> {
+        Ok(self.repo().set_note_text(note_id(&note)?, &text)?)
+    }
+
+    pub fn delete_note(&self, note: String) -> Res<()> {
+        Ok(self.repo().delete_note(note_id(&note)?)?)
     }
 
     pub fn set_done(&self, task: String, done: bool) -> Res<()> {

@@ -12,7 +12,7 @@ use cpasfait_core::report::fmt_duration;
 use cpasfait_core::score::{PRIORITY_MAX, PRIORITY_MIN};
 use cpasfait_core::sync::{MoveStep, invited_to, remote_tabs, sync_tab};
 use cpasfait_core::taskfile;
-use cpasfait_core::{Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
+use cpasfait_core::{Note, Place, RemoteConfig, Repo, Row, Session, TabId, TabInfo, TaskId, Tree};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use std::collections::HashSet;
@@ -60,6 +60,10 @@ pub const EDIT_DAYS: i64 = 30;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     EditNotes(TaskId),
+    /// Write a new note on the task in the editor (`:note` alone).
+    NewNote(TaskId),
+    /// Fix or delete the task's notes in the editor (`:notes`).
+    EditNoteList(TaskId),
     /// Title and work log in the editor (see [`App::task_file`]), sessions
     /// ending after the given time (Unix ms) only.
     EditTask(TaskId, Option<i64>),
@@ -99,6 +103,8 @@ pub struct App {
     pub open_sessions: Vec<Session>,
     /// Sessions of the selected task.
     pub detail_sessions: Vec<Session>,
+    /// Notes of the selected task, newest first.
+    pub detail_notes: Vec<Note>,
     /// Scores of the open tasks of the current tab.
     pub scores: std::collections::HashMap<TaskId, cpasfait_core::score::Score>,
     /// Requirements of the selected task and what it blocks.
@@ -149,6 +155,7 @@ impl App {
             active: None,
             open_sessions: vec![],
             detail_sessions: vec![],
+            detail_notes: vec![],
             scores: Default::default(),
             detail_deps: Default::default(),
             next: None,
@@ -368,6 +375,10 @@ impl App {
         self.detail_sessions = self
             .selected()
             .map(|t| self.repo.sessions_for_task(t).unwrap_or_default())
+            .unwrap_or_default();
+        self.detail_notes = self
+            .selected()
+            .map(|t| self.repo.notes_for_task(t).unwrap_or_default())
             .unwrap_or_default();
         self.detail_deps = self
             .selected()
@@ -893,6 +904,11 @@ impl App {
                     self.start_insert(id, &title, false);
                 }
             }
+            AddNote => {
+                if sel.is_some() {
+                    self.mode = Mode::Command(LineEditor::new("note "));
+                }
+            }
             EditNotes => {
                 if let Some(id) = sel {
                     self.requests.push(Request::EditNotes(id));
@@ -1314,6 +1330,22 @@ impl App {
                 self.repo.start_work_at(task, at)?;
                 self.refresh()?;
                 self.info(format!("working on {title:?} since {}{msg}", self.fmt_time(at)));
+            }
+            "note" => {
+                let t = need_task(self)?;
+                if arg.is_empty() {
+                    self.requests.push(Request::NewNote(t));
+                } else {
+                    self.repo.add_note(t, arg)?;
+                    self.refresh()?;
+                }
+            }
+            "notes" => {
+                let t = need_task(self)?;
+                if self.repo.notes_for_task(t)?.is_empty() {
+                    bail!("no notes on this task: add one with :note TEXT (or N)");
+                }
+                self.requests.push(Request::EditNoteList(t));
             }
             "worknote" => {
                 let session = match &self.active {

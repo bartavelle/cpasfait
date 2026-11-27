@@ -309,7 +309,8 @@ private fun meta(r: RowView): List<Pair<String, Color?>> {
     if (r.priority != 0L) out.add((if (r.priority > 0) "+${r.priority}" else "${r.priority}") to null)
     if (r.tags.isNotEmpty()) out.add(r.tags.joinToString(" ") { "#$it" } to null)
     if (r.working.isNotEmpty()) out.add("⏱ ${r.working.joinToString(", ")}" to MaterialTheme.colorScheme.primary)
-    if (r.hasNotes) out.add("✎" to null)
+    if (r.noteCount > 0u) out.add("✎ ${r.noteCount}" to null)
+    else if (r.hasDescription) out.add("✎" to null)
     return out
 }
 

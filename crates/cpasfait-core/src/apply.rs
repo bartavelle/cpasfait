@@ -71,6 +71,12 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
             params![entity, tab],
         )
     };
+    let ensure_note = || {
+        conn.execute(
+            "INSERT OR IGNORE INTO note(id, tab) VALUES (?1, ?2)",
+            params![entity, tab],
+        )
+    };
     let ensure_tab = || conn.execute("INSERT OR IGNORE INTO tab(id) VALUES (?1)", params![entity]);
     macro_rules! set {
         ($ensure:ident, $table:literal, $col:literal, $val:expr) => {{
@@ -163,6 +169,17 @@ pub(crate) fn apply_to_model(conn: &Connection, op: &Op) -> Result<()> {
         SessionEnd(t) => set!(ensure_session, "session", "end", t),
         SessionNote(s) => set!(ensure_session, "session", "note", s),
         SessionDeleted(b) => set!(ensure_session, "session", "deleted", b),
+        NoteTask(t) => set!(ensure_note, "note", "task", t.to_string()),
+        NoteAt(t) => set!(ensure_note, "note", "at", t),
+        NoteAuthor(a) => {
+            ensure_note()?;
+            conn.execute(
+                "UPDATE note SET author_name = ?2, author_email = ?3 WHERE id = ?1",
+                params![entity, a.name, a.email],
+            )?;
+        }
+        NoteText(s) => set!(ensure_note, "note", "text", s),
+        NoteDeleted(b) => set!(ensure_note, "note", "deleted", b),
     }
     Ok(())
 }

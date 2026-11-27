@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 const SCHEMA_V1: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -167,6 +167,21 @@ const SCHEMA_V8: &str = "
 CREATE TABLE due_notified(task TEXT PRIMARY KEY, due TEXT NOT NULL) WITHOUT ROWID;
 ";
 
+/// Dated notes on tasks (read model).
+const SCHEMA_V9: &str = "
+CREATE TABLE note(
+    id TEXT PRIMARY KEY,
+    tab TEXT NOT NULL,
+    task TEXT,
+    at INTEGER,
+    author_name TEXT,
+    author_email TEXT,
+    text TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX note_task ON note(task);
+";
+
 /// Bring the schema up to date. Returns true when the read model must be
 /// rebuilt from the op log (a new table may interpret ops already received).
 pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
@@ -198,6 +213,9 @@ pub fn migrate(conn: &mut Connection) -> rusqlite::Result<bool> {
     }
     if version < 8 {
         tx.execute_batch(SCHEMA_V8)?;
+    }
+    if version < 9 {
+        tx.execute_batch(SCHEMA_V9)?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;

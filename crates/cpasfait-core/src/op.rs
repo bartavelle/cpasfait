@@ -5,7 +5,7 @@
 //! (forward compatibility). [`Change`] is the typed interpretation.
 
 use crate::hlc::Hlc;
-use crate::ids::{SessionId, TabId, TaskId};
+use crate::ids::{NoteId, SessionId, TabId, TaskId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -99,6 +99,16 @@ pub enum Change {
     SessionEnd(Option<i64>),
     SessionNote(String),
     SessionDeleted(bool),
+
+    /// A dated note on a task (a status update), its own entity so that
+    /// notes written concurrently all survive.
+    NoteTask(TaskId),
+    /// Unix milliseconds.
+    NoteAt(i64),
+    /// Wire value: `{"name": ..., "email": ...}` (email optional).
+    NoteAuthor(crate::model::Author),
+    NoteText(String),
+    NoteDeleted(bool),
 }
 
 /// Kind of entity an op applies to.
@@ -107,6 +117,7 @@ pub enum EntityKind {
     Tab,
     Task,
     Session,
+    Note,
 }
 
 const TAG_PREFIX: &str = "task.tag:";
@@ -132,6 +143,7 @@ impl Change {
             | TaskDeleted(_) => EntityKind::Task,
             SessionTask(_) | SessionDevice(_) | SessionUser(_) | SessionStart(_) | SessionEnd(_) | SessionNote(_)
             | SessionDeleted(_) => EntityKind::Session,
+            NoteTask(_) | NoteAt(_) | NoteAuthor(_) | NoteText(_) | NoteDeleted(_) => EntityKind::Note,
         }
     }
 
@@ -162,14 +174,20 @@ impl Change {
             SessionEnd(_) => "session.end".into(),
             SessionNote(_) => "session.note".into(),
             SessionDeleted(_) => "session.deleted".into(),
+            NoteTask(_) => "note.task".into(),
+            NoteAt(_) => "note.at".into(),
+            NoteAuthor(_) => "note.author".into(),
+            NoteText(_) => "note.text".into(),
+            NoteDeleted(_) => "note.deleted".into(),
         }
     }
 
     pub fn value(&self) -> Value {
         use Change::*;
         match self {
-            TabName(s) | TaskTitle(s) | TaskNotes(s) | TaskPosition(s) | SessionUser(s) | SessionNote(s) => json!(s),
-            TabDeleted(b) | TaskDeleted(b) | SessionDeleted(b) => json!(b),
+            TabName(s) | TaskTitle(s) | TaskNotes(s) | TaskPosition(s) | SessionUser(s) | SessionNote(s)
+            | NoteText(s) => json!(s),
+            TabDeleted(b) | TaskDeleted(b) | SessionDeleted(b) | NoteDeleted(b) => json!(b),
             TaskTag { on, .. } => json!(on),
             TabMember { name: Some(n), .. } => json!(n),
             TabMember { name: None, .. } => json!(false),
@@ -178,7 +196,9 @@ impl Change {
             TaskBlockedBy { on: false, .. } => json!(false),
             TaskBlockedBy { tab: None, .. } => json!(true),
             TaskBlockedBy { tab: Some(tab), .. } => json!(tab.0.to_string()),
-            TaskAuthor(a) => serde_json::to_value(a).unwrap_or(Value::Null),
+            TaskAuthor(a) | NoteAuthor(a) => serde_json::to_value(a).unwrap_or(Value::Null),
+            NoteTask(t) => json!(t.0.to_string()),
+            NoteAt(t) => json!(t),
             TaskStatus(s) => json!(s.as_str()),
             TaskPriority(p) => json!(p),
             TaskDue(d) => match d {
@@ -272,6 +292,11 @@ impl Change {
             "session.end" => SessionEnd(if value.is_null() { None } else { Some(value.as_i64()?) }),
             "session.note" => SessionNote(s()?),
             "session.deleted" => SessionDeleted(b()?),
+            "note.task" => NoteTask(TaskId(uuid()?)),
+            "note.at" => NoteAt(value.as_i64()?),
+            "note.author" => NoteAuthor(serde_json::from_value(value.clone()).ok()?),
+            "note.text" => NoteText(s()?),
+            "note.deleted" => NoteDeleted(b()?),
             _ => return None,
         })
     }
@@ -292,6 +317,11 @@ impl Entity for TaskId {
     }
 }
 impl Entity for SessionId {
+    fn uuid(&self) -> Uuid {
+        self.0
+    }
+}
+impl Entity for NoteId {
     fn uuid(&self) -> Uuid {
         self.0
     }
@@ -364,6 +394,14 @@ mod tests {
             Change::TaskStatus(Status::Done),
             Change::SessionEnd(Some(42)),
             Change::SessionEnd(None),
+            Change::NoteTask(TaskId::new()),
+            Change::NoteAt(1_700_000_000_000),
+            Change::NoteAuthor(crate::model::Author {
+                name: "alice".into(),
+                email: None,
+            }),
+            Change::NoteText("waiting for the supplier".into()),
+            Change::NoteDeleted(true),
         ];
         for c in changes {
             assert_eq!(Change::parse(&c.field(), &c.value()), Some(c));

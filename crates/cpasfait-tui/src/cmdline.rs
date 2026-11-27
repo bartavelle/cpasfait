@@ -10,6 +10,8 @@ pub const COMMANDS: &[&str] = &[
     "help",
     "moveto",
     "mykey",
+    "note",
+    "notes",
     "prio",
     "q",
     "rebuild",

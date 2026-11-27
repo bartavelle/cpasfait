@@ -21,6 +21,7 @@ pub enum Action {
     EditTitle,
     ReplaceTitle,
     EditNotes,
+    AddNote,
     EditTask,
     EditTags,
     Search,
@@ -77,6 +78,7 @@ const BINDINGS: &[(&str, Action)] = &[
     ("cc", Action::ReplaceTitle),
     ("e", Action::EditNotes),
     ("E", Action::EditTask),
+    ("N", Action::AddNote),
     ("t", Action::EditTags),
     ("x", Action::ToggleDone),
     (" ", Action::ToggleDone),
@@ -145,11 +147,13 @@ Navigation    j/k ↓/↑  move        gg/G  top/bottom     ^d/^u  page
               gs       jump to the task being worked on
               ^p /     find a task (fuzzy, all tabs): ↑/↓ choose, Enter go
 Editing       n        new task (beside this one)       a      new subtask
-              i Enter  edit title    cc  replace title   e      notes in $EDITOR
+              i Enter  edit title    cc  replace title   e      description in $EDITOR
               x Space  toggle done   dd  delete          u      undo delete
               >>/<<    indent/outdent       (tasks are sorted by score: + - :due)
               +/-      priority up/down (-3 to 3)       t      edit tags
               E :edit  title and work log in $EDITOR, last 30 days (:edit all, :edit DATE)
+              N        add a dated note (status update): :note TEXT, or :note alone for
+                       $EDITOR; :notes to fix or delete them
 Work log      s        start/stop working on the task   S      stop running work at…
               W        switch to this task at…          (times: 14:30, -20m, yesterday 18:00)
 View          H        hide/show done tasks             D      toggle detail pane

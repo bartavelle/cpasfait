@@ -3,10 +3,10 @@
 use crate::apply::{apply_op, apply_to_model};
 use crate::error::{Error, Result};
 use crate::hlc::{ClockState, Hlc};
-use crate::ids::{DeviceId, SessionId, TabId, TaskId};
+use crate::ids::{DeviceId, NoteId, SessionId, TabId, TaskId};
 use crate::model::{
-    Author, DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, TabInfo, TabSettings,
-    Task,
+    Author, DepInfo, DepState, Dependencies, Epoch, Member, Note, RemoteConfig, RemoteMove, Session, TabInfo,
+    TabSettings, Task,
 };
 use crate::op::{Change, Entity, Op, Status};
 use crate::position::key_between;
@@ -105,6 +105,23 @@ fn session_from_row(r: &Row) -> rusqlite::Result<Session> {
         end: r.get(6)?,
         note: r.get(7)?,
         deleted: r.get(8)?,
+    })
+}
+
+const NOTE_COLS: &str = "id, tab, task, at, author_name, author_email, text, deleted";
+
+fn note_from_row(r: &Row) -> rusqlite::Result<Note> {
+    Ok(Note {
+        id: parse_id(&r.get::<_, String>(0)?)?,
+        tab: parse_id(&r.get::<_, String>(1)?)?,
+        task: opt_id(r.get(2)?)?,
+        at: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+        author: Author {
+            name: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            email: r.get(5)?,
+        },
+        text: r.get(6)?,
+        deleted: r.get(7)?,
     })
 }
 
@@ -728,6 +745,10 @@ impl Repo {
             i += 1;
         }
         let ids: std::collections::HashMap<TaskId, TaskId> = moved.iter().map(|t| (t.id, TaskId::new())).collect();
+        let mut notes = vec![];
+        for t in &moved {
+            notes.extend(self.notes_for_task(t.id)?);
+        }
         let mut sessions = vec![];
         for t in &moved {
             for s in self.sessions_for_task(t.id)? {
@@ -843,6 +864,17 @@ impl Repo {
                 edits.push((to, new, Change::SessionNote(s.note.clone())));
             }
             edits.push((from, s.id.0, Change::SessionDeleted(true)));
+        }
+        for n in &notes {
+            let Some(task) = n.task.and_then(|t| ids.get(&t)) else {
+                continue;
+            };
+            let new = NoteId::new().0;
+            edits.push((to, new, Change::NoteTask(*task)));
+            edits.push((to, new, Change::NoteAt(n.at)));
+            edits.push((to, new, Change::NoteAuthor(n.author.clone())));
+            edits.push((to, new, Change::NoteText(n.text.clone())));
+            edits.push((from, n.id.0, Change::NoteDeleted(true)));
         }
         self.commit(edits)?;
         Ok(Moved {
@@ -1377,6 +1409,73 @@ impl Repo {
         Ok(())
     }
 
+    /// Add a dated note to `task` (a status update), by this user, now.
+    pub fn add_note(&mut self, task: TaskId, text: &str) -> Result<NoteId> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(Error::Invalid("empty note".into()));
+        }
+        let t = self.task(task)?;
+        let id = NoteId::new();
+        let now = self.now_ms();
+        self.commit(vec![
+            (t.tab, id.0, Change::NoteTask(task)),
+            (t.tab, id.0, Change::NoteAt(now)),
+            (t.tab, id.0, Change::NoteAuthor(self.author())),
+            (t.tab, id.0, Change::NoteText(text.to_owned())),
+        ])?;
+        Ok(id)
+    }
+
+    /// Change a note's text (empty: delete it).
+    pub fn set_note_text(&mut self, id: NoteId, text: &str) -> Result<()> {
+        let n = self.note(id)?;
+        let text = text.trim();
+        if text.is_empty() {
+            return self.delete_note(id);
+        }
+        if text == n.text {
+            return Ok(());
+        }
+        self.edit1(n.tab, id, Change::NoteText(text.to_owned()))
+    }
+
+    pub fn delete_note(&mut self, id: NoteId) -> Result<()> {
+        let n = self.note(id)?;
+        self.edit1(n.tab, id, Change::NoteDeleted(true))
+    }
+
+    pub fn note(&self, id: NoteId) -> Result<Note> {
+        self.conn
+            .query_row(
+                &format!("SELECT {NOTE_COLS} FROM note WHERE id = ?1"),
+                params![id.to_string()],
+                note_from_row,
+            )
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("note {id}")))
+    }
+
+    /// Number of notes per task of `tab` (tasks without notes left out).
+    pub fn note_counts(&self, tab: TabId) -> Result<std::collections::HashMap<TaskId, u32>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT task, count(*) FROM note WHERE tab = ?1 AND deleted = 0 AND task IS NOT NULL GROUP BY task",
+        )?;
+        let rows = st.query_map(params![tab.to_string()], |r| {
+            Ok((parse_id(&r.get::<_, String>(0)?)?, r.get(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Notes of a task (not deleted), most recent first.
+    pub fn notes_for_task(&self, task: TaskId) -> Result<Vec<Note>> {
+        let mut st = self.conn.prepare_cached(&format!(
+            "SELECT {NOTE_COLS} FROM note WHERE task = ?1 AND deleted = 0 ORDER BY at DESC, id DESC"
+        ))?;
+        let rows = st.query_map(params![task.to_string()], note_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn session(&self, id: SessionId) -> Result<Session> {
         self.conn
             .query_row(
@@ -1613,7 +1712,7 @@ impl Repo {
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(
             "DELETE FROM field_hlc; DELETE FROM task; DELETE FROM task_tag; DELETE FROM task_dep; DELETE FROM session;
-             DELETE FROM tab_member; DELETE FROM tab_setting;
+             DELETE FROM note; DELETE FROM tab_member; DELETE FROM tab_setting;
              UPDATE tab SET name = '', deleted = 0, move_id = NULL, move_remote = NULL, move_by = NULL;",
         )?;
         for op in &ops {
@@ -1643,6 +1742,10 @@ impl Repo {
             (
                 "SELECT id, tab, task, device, user, start, end, note, deleted FROM session ORDER BY id",
                 9,
+            ),
+            (
+                "SELECT id, tab, task, at, author_name, author_email, text, deleted FROM note ORDER BY id",
+                8,
             ),
         ] {
             let mut st = self.conn.prepare(q)?;

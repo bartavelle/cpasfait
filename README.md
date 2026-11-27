@@ -59,6 +59,8 @@ Press `?` in the TUI for all keys. The essentials:
   ```
 
   Correct a line to fix a session, delete it to delete the session, add one to log time (seconds are optional; a running session has no end). Overlapping sessions are merged into one (sessions that only touch stay apart). Times are local, `#` starts a comment, and other members' sessions are labelled with their name. On save, all the changes are applied, or none: on an error (shown in the status line) pressing `E` again reopens your text with the error on top. An empty file, or an editor exiting with an error (vim's `:cq`), cancels
+- `N` (or `:note TEXT`) adds a note to the task: a status update, dated and signed with your name, shown newest first in the details pane (the 5 latest). Notes written by several people at once all survive. `:note` alone opens `$EDITOR` for a longer one, `:notes` opens all of them to fix a text or delete one (delete its block). `e` edits the task's description, a single free text
+- `:` remembers the commands you run (`↑`/`↓`, only those starting with what is typed; kept next to the database) and completes with `Tab`: commands, tags, tab names, members, settings, and remotes you used before
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)
 - The details pane (`D`) shows the task's total time, today's and this week's, and its 8 latest sessions

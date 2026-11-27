@@ -48,3 +48,4 @@ id_type!(DeviceId);
 id_type!(TabId);
 id_type!(TaskId);
 id_type!(SessionId);
+id_type!(NoteId);

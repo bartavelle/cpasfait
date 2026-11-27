@@ -222,6 +222,19 @@ pub struct Session {
     pub deleted: bool,
 }
 
+/// A dated note on a task, to follow its progress.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Note {
+    pub id: crate::ids::NoteId,
+    pub tab: TabId,
+    pub task: Option<TaskId>,
+    /// Unix milliseconds.
+    pub at: i64,
+    pub author: Author,
+    pub text: String,
+    pub deleted: bool,
+}
+
 impl Session {
     pub fn is_open(&self) -> bool {
         self.end.is_none()

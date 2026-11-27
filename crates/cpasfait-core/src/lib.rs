@@ -27,9 +27,9 @@ pub mod tree;
 
 pub use due::Due;
 pub use error::{Error, Result};
-pub use ids::{DeviceId, SessionId, TabId, TaskId};
+pub use ids::{DeviceId, NoteId, SessionId, TabId, TaskId};
 pub use model::{
-    Author, DepInfo, DepState, Dependencies, Epoch, Member, RemoteConfig, RemoteMove, Session, SettingInfo,
+    Author, DepInfo, DepState, Dependencies, Epoch, Member, Note, RemoteConfig, RemoteMove, Session, SettingInfo,
     TAB_SETTINGS, TabInfo, TabSettings, Task,
 };
 pub use op::{Change, Op, Status};

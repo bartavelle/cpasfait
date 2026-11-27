@@ -60,6 +60,11 @@ are ordered after them.
 | `session.end` | unix ms \| null | null = running |
 | `session.note` | string | |
 | `session.deleted` | bool | tombstone |
+| `note.task` | task id | a dated note (status update) → task; one entity per note |
+| `note.at` | unix ms | when it was written |
+| `note.author` | `{"name": string, "email"?: string}` | who wrote it |
+| `note.text` | string | may span several lines |
+| `note.deleted` | bool | tombstone |
 
 An entity exists as soon as any op targets it. Missing fields take their defaults.
 

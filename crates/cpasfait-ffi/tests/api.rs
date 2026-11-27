@@ -105,6 +105,29 @@ fn app_api() {
     app.set_done(walls.clone(), true).unwrap();
     assert_eq!(app.rows(tab.clone(), true).unwrap().len(), 2);
 
+    // Description and notes.
+    app.set_description(paint.clone(), "two coats".into()).unwrap();
+    let n1 = app.add_note(paint.clone(), "bought the paint".into()).unwrap();
+    app.add_note(paint.clone(), "first coat done".into()).unwrap();
+    let d = app.task(paint.clone()).unwrap();
+    assert_eq!(d.description, "two coats");
+    assert_eq!(d.notes.len(), 2);
+    assert!(d.notes.iter().all(|n| n.mine && n.author == app.user()));
+    let row = |app: &Cpasfait| {
+        app.rows(tab.clone(), false)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == paint)
+            .unwrap()
+    };
+    assert!(row(&app).has_description);
+    assert_eq!(row(&app).note_count, 2);
+    app.set_note_text(n1.clone(), "bought the paint (white)".into())
+        .unwrap();
+    app.delete_note(n1).unwrap();
+    assert_eq!(app.task(paint.clone()).unwrap().notes[0].text, "first coat done");
+    assert!(app.add_note(paint.clone(), " ".into()).is_err());
+
     // Work log.
     let version = bg.data_version().unwrap();
     let session = app.start_work(report.clone()).unwrap();
