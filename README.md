@@ -48,18 +48,30 @@ Press `?` in the TUI for all keys. The essentials:
 - `>>`/`<<` indent or outdent, `+`/`-` priority
 - `s` start or stop working on the task (starting one stops the other)
 - Forgot to stop or switch? `S` stops what is running and `W` switches to the selected task, at a time you give: they open the command line prefilled with the current time (`:stop 14:32`, `:switch 14:32`), Enter to accept or edit it first. Times: `14:30` (a time not reached yet today is yesterday's), `-20m`, `-1h30`, `yesterday 18:00`, `2026-11-22 18:00`. With nothing running, `W` starts the task back-dated (not before your last session ended)
-- `E` (or `:edit`) opens the task's title and work log of the last 30 days in `$VISUAL`/`$EDITOR`, like `task edit` (`:edit all` for the whole log, `:edit 2026-10-01` or `:edit -3m` from a date; older sessions are not shown and stay as they are):
+- `E` (or `:edit`) opens the whole task in `$VISUAL`/`$EDITOR`, like `task edit`: its fields, description, notes, and work log of the last 30 days (`:edit all` for the whole log, `:edit 2026-10-01` or `:edit -3m` from a date; older sessions are not shown and stay as they are):
 
   ```
   title: Write the report
+  status: todo
+  priority: 1
+  due: 2026-12-01
+  # tags: TAG OTHER-TAG
+  # requires: TASK-ID
+
+  description:
+  Quarterly report, figures from the finance team.
+
+  notes:
+  @@ 1 · 2026-11-27 14:30 · alice
+  Sent the draft to Bob.
 
   work log:
   2026-11-20 09:00:00 - 2026-11-20 10:30:00
   2026-11-23 14:00:00 -                      # running
   ```
 
-  Correct a line to fix a session, delete it to delete the session, add one to log time (seconds are optional; a running session has no end). Overlapping sessions are merged into one (sessions that only touch stay apart). Times are local, `#` starts a comment, and other members' sessions are labelled with their name. On save, all the changes are applied, or none: on an error (shown in the status line) pressing `E` again reopens your text with the error on top. An empty file, or an editor exiting with an error (vim's `:cq`), cancels
-- `N` (or `:note TEXT`) adds a note to the task: a status update, dated and signed with your name, shown newest first in the details pane (the 5 latest). Notes written by several people at once all survive. `:note` alone opens `$EDITOR` for a longer one, `:notes` opens all of them to fix a text or delete one (delete its block). `e` edits the task's description, a single free text
+  Optional fields that are unset are shown commented out, with an example value (the due date is now): uncomment one to set it, comment it out or delete it to unset it. Due dates can be relative (`tomorrow`, `fri 9:00`); `requires` takes a task id per line. The description and the notes are kept as written (`#` lines included). Change a note to correct it, delete its block (from its `@@` line) to delete it, and add one with a line `@@` followed by its text. In the work log, correct a line to fix a session, delete it to delete the session, add one to log time (seconds are optional; a running session has no end). Overlapping sessions are merged into one (sessions that only touch stay apart). Times are local, `#` starts a comment, and other members' sessions are labelled with their name. A section left out entirely (description, notes or work log) is left alone. On save, all the changes are applied, or none: on an error (shown in the status line) pressing `E` again reopens your text with the error on top. An empty file, or an editor exiting with an error (vim's `:cq`), cancels
+- `N` (or `:note TEXT`) adds a note to the task: a status update, dated and signed with your name, shown newest first in the details pane (the 5 latest). Notes written by several people at once all survive. Longer notes, and fixing or deleting notes, happen in `E` (`:note` alone opens it). `e` edits just the task's description
 - `:` remembers the commands you run (`↑`/`↓`, only those starting with what is typed; kept next to the database) and completes with `Tab`: commands, tags, tab names, members, settings, and remotes you used before
 - `gn` jumps to the next task, the same one `cpasfait-next` prints
 - `Ctrl-P` or `/` finds a task by fuzzy search on titles across all tabs (`↑`/`↓` to choose, `Enter` to go)

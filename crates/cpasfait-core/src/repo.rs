@@ -972,9 +972,15 @@ impl Repo {
     /// ancestors (it could never become actionable) and links that would
     /// close a cycle.
     pub fn set_blocked_by(&mut self, task: TaskId, blocker: TaskId, on: bool) -> Result<()> {
+        let edit = self.blocked_by_edit(task, blocker, on)?;
+        self.commit(vec![edit])
+    }
+
+    /// The edit of [`Repo::set_blocked_by`], checked but not recorded.
+    pub fn blocked_by_edit(&self, task: TaskId, blocker: TaskId, on: bool) -> Result<Edit> {
+        let t = self.task(task)?;
         let mut tab = None;
         if on {
-            let t = self.task(task)?;
             let b = self.task(blocker)?;
             if task == blocker {
                 return Err(Error::Invalid("a task cannot require itself".into()));
@@ -987,7 +993,7 @@ impl Repo {
             }
             tab = Some(b.tab);
         }
-        self.set_task(task, Change::TaskBlockedBy { task: blocker, tab, on })
+        Ok((t.tab, task.0, Change::TaskBlockedBy { task: blocker, tab, on }))
     }
 
     /// Does `from` require `to`, directly or transitively (across tabs)?

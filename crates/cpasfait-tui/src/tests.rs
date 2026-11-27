@@ -841,13 +841,13 @@ fn edit_task_in_editor() {
     assert!(text.contains("\n2023-11-14 22:13:20 - 2023-11-14 23:13:20\n"), "{text}");
     let edited = text.replace("title: Alpha", "title: Alpha 2") + "2023-11-14 20:00 - 2023-11-14 2l:00\n";
     app.finish_task_edit(task, since, Ok(edited));
-    assert!(message(&app).starts_with("line 11: expected"), "{}", message(&app));
+    assert!(message(&app).starts_with("line 28: expected"), "{}", message(&app));
     assert_eq!(app.repo.task(task).unwrap().title, "Alpha");
     // the next edit shows the failed text, with the error
     // (with the window it was made with)
     let (again, again_since) = app.task_file(task, None).unwrap();
     assert_eq!(again_since, since);
-    assert!(again.starts_with("# error: line 11: expected"), "{again}");
+    assert!(again.starts_with("# error: line 28: expected"), "{again}");
     let fixed = again.replace("2l:00", "21:00");
     app.finish_task_edit(task, since, Ok(fixed));
     assert_eq!(message(&app), "title changed, 1 session added");
@@ -1051,19 +1051,95 @@ fn tab_completion() {
 #[test]
 fn notes_on_tasks() {
     let (mut app, _) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
     press(&mut app, "nreport<esc>");
-    press(&mut app, ":notes<enter>");
-    assert!(message(&app).contains("no notes"), "{}", message(&app));
     press(&mut app, "N");
     assert_eq!(cmdline(&app), "note ");
     press(&mut app, "sent the draft to Bob<enter>");
-    press(&mut app, ":note<enter>");
-    let task = app.selected().unwrap();
-    assert_eq!(app.requests, vec![crate::app::Request::NewNote(task)]);
-    app.requests.clear();
     assert_eq!(app.detail_notes.len(), 1);
     let s = screen(&mut app, 100, 20);
     assert!(s.contains("notes") && s.contains("  sent the draft to Bob"), "{s}");
-    press(&mut app, ":notes<enter>");
-    assert_eq!(app.requests, vec![crate::app::Request::EditNoteList(task)]);
+    // :note alone: the task's file, where "@@" adds one.
+    press(&mut app, ":note<enter>");
+    let task = app.selected().unwrap();
+    assert!(matches!(app.requests[..], [crate::app::Request::EditTask(t, _)] if t == task));
+    app.requests.clear();
+}
+
+#[test]
+fn edit_the_whole_task() {
+    let (mut app, _) = app();
+    app.tz = jiff::tz::TimeZone::UTC;
+    press(&mut app, "nreport<esc>nother<esc>");
+    let task = app.rows[0].id;
+    let other = app.rows[1].id;
+    app.repo.add_note(task, "first").unwrap();
+    let (text, since) = app.task_file(task, None).unwrap();
+    // Unset optional fields are commented out, the due date with now.
+    assert!(
+        text.starts_with(
+            "title: report\nstatus: todo\n# priority: 0\n# due: 2023-11-14 22:13:20\n# tags: TAG OTHER-TAG\n# requires: TASK-ID\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("\nnotes:\n@@ 1 · 2023-11-14 22:13 · "), "{text}");
+    let edited = text
+        .replace("# priority: 0", "priority: 2")
+        .replace("# due: 2023-11-14 22:13:20", "due: 2023-12-01")
+        .replace("# tags: TAG OTHER-TAG", "tags: work +urgent")
+        .replace("# requires: TASK-ID", &format!("requires: {other}"))
+        .replace("description:\n", "description:\n# Plan\n@@ not a note\n")
+        .replace("\nfirst\n", "\nfirst, fixed\n@@\nsecond\n");
+    app.finish_task_edit(task, since, Ok(edited));
+    assert_eq!(
+        message(&app),
+        "priority, due, tags, description, requires changed, 1 note added, 1 note changed"
+    );
+    let t = app.repo.task(task).unwrap();
+    assert_eq!(t.priority, 2);
+    assert_eq!(t.due.unwrap().to_string(), "2023-12-01");
+    assert_eq!(t.tags, ["urgent", "work"]);
+    assert_eq!(t.blocked_by, [other]);
+    assert_eq!(t.notes, "# Plan\n@@ not a note");
+    let notes: Vec<_> = app
+        .repo
+        .notes_for_task(task)
+        .unwrap()
+        .into_iter()
+        .map(|n| n.text)
+        .collect();
+    assert_eq!(notes.len(), 2);
+    assert!(notes.contains(&"first, fixed".to_owned()) && notes.contains(&"second".to_owned()));
+
+    // Set fields are shown as is; commenting them out unsets them.
+    let (text, since) = app.task_file(task, None).unwrap();
+    assert!(
+        text.contains("\npriority: 2\ndue: 2023-12-01\ntags: urgent work\nrequires: "),
+        "{text}"
+    );
+    assert!(text.contains("\ndescription:\n# Plan\n\\@@ not a note\n"), "{text}");
+    let edited = text
+        .replace("due: 2023-12-01", "# due: 2023-12-01")
+        .replace("\ntags: urgent work", "\n#tags: urgent work")
+        .replace("status: todo", "status: done");
+    app.finish_task_edit(task, since, Ok(edited));
+    assert_eq!(message(&app), "status, due, tags changed");
+    let t = app.repo.task(task).unwrap();
+    assert!(t.due.is_none() && t.tags.is_empty() && t.is_done());
+
+    // Errors: nothing changed.
+    let (text, since) = app.task_file(task, None).unwrap();
+    app.finish_task_edit(task, since, Ok(text.replace("priority: 2", "priority: 9")));
+    assert!(
+        message(&app).contains("priority is a number from -3 to 3"),
+        "{}",
+        message(&app)
+    );
+    let (text, since) = app.task_file(task, None).unwrap();
+    let text = text
+        .replace("priority: 9", "priority: 1")
+        .replace(&format!("requires: {other}"), &format!("requires: {task}"));
+    app.finish_task_edit(task, since, Ok(text));
+    assert!(message(&app).contains("cannot require itself"), "{}", message(&app));
+    assert_eq!(app.repo.task(task).unwrap().priority, 2);
 }

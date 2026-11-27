@@ -60,11 +60,7 @@ pub const EDIT_DAYS: i64 = 30;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     EditNotes(TaskId),
-    /// Write a new note on the task in the editor (`:note` alone).
-    NewNote(TaskId),
-    /// Fix or delete the task's notes in the editor (`:notes`).
-    EditNoteList(TaskId),
-    /// Title and work log in the editor (see [`App::task_file`]), sessions
+    /// The task's fields, description, notes and work log in the editor (see [`App::task_file`]), sessions
     /// ending after the given time (Unix ms) only.
     EditTask(TaskId, Option<i64>),
     Sync,
@@ -1163,7 +1159,7 @@ impl App {
                 return self.error(format!("{e}: nothing changed"));
             }
         };
-        let res = taskfile::parse(&text, &self.tz).and_then(|f| match f {
+        let res = taskfile::parse(&text, &self.tz, self.repo.today()).and_then(|f| match f {
             Some(f) => taskfile::apply(&mut self.repo, task, &f, since).map(Some),
             None => Ok(None),
         });
@@ -1337,18 +1333,12 @@ impl App {
             "note" => {
                 let t = need_task(self)?;
                 if arg.is_empty() {
-                    self.requests.push(Request::NewNote(t));
+                    // Longer notes: in the task's file ("@@" adds one).
+                    self.requests.push(Request::EditTask(t, self.edit_since(None)?));
                 } else {
                     self.repo.add_note(t, arg)?;
                     self.refresh()?;
                 }
-            }
-            "notes" => {
-                let t = need_task(self)?;
-                if self.repo.notes_for_task(t)?.is_empty() {
-                    bail!("no notes on this task: add one with :note TEXT (or N)");
-                }
-                self.requests.push(Request::EditNoteList(t));
             }
             "worknote" => {
                 let session = match &self.active {

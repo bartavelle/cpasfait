@@ -151,9 +151,10 @@ Editing       n        new task (beside this one)       a      new subtask
               x Space  toggle done   dd  delete          u      undo delete
               >>/<<    indent/outdent       (tasks are sorted by score: + - :due)
               +/-      priority up/down (-3 to 3)       t      edit tags
-              E :edit  title and work log in $EDITOR, last 30 days (:edit all, :edit DATE)
-              N        add a dated note (status update): :note TEXT, or :note alone for
-                       $EDITOR; :notes to fix or delete them
+              E :edit  the whole task in $EDITOR: fields, description, notes, work log of
+                       the last 30 days (:edit all, :edit DATE)
+              N        add a dated note (status update): :note TEXT; longer ones, and
+                       fixing or deleting notes, in E
 Work log      s        start/stop working on the task   S      stop running work at…
               W        switch to this task at…          (times: 14:30, -20m, yesterday 18:00)
 View          H        hide/show done tasks             D      toggle detail pane

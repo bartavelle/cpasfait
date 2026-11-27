@@ -28,7 +28,7 @@ fn setup() -> (Repo, Arc<AtomicI64>) {
 
 fn edit(r: &mut Repo, task: cpasfait_core::TaskId, f: impl Fn(String) -> String) -> cpasfait_core::Result<Applied> {
     let text = f(taskfile::render(r, task, &TimeZone::UTC, None)?);
-    let file = taskfile::parse(&text, &TimeZone::UTC)?.expect("not empty");
+    let file = taskfile::parse(&text, &TimeZone::UTC, r.today())?.expect("not empty");
     taskfile::apply(r, task, &file, None)
 }
 
@@ -82,11 +82,10 @@ fn render_and_edit() {
     assert_eq!(
         applied,
         Applied {
-            title: true,
-            merged: 0,
+            fields: vec!["title"],
             added: 1,
             changed: 1,
-            deleted: 0
+            ..Applied::default()
         }
     );
     assert_eq!(r.task(a).unwrap().title, "Write the report");
@@ -123,7 +122,8 @@ fn bad_edits_change_nothing() {
     r.stop_work().unwrap();
     let before = r.local_changes();
     let tz = TimeZone::UTC;
-    let parse = |t: &str| taskfile::parse(t, &tz);
+    let today = r.today();
+    let parse = |t: &str| taskfile::parse(t, &tz, today);
 
     assert_eq!(parse("# only comments\n\n").unwrap(), None);
     assert!(err(parse("work log:\n")).contains("no \"title"));
@@ -247,7 +247,7 @@ fn only_recent_sessions() {
         .filter(|l| !l.starts_with("2026"))
         .map(|l| format!("{l}\n"))
         .collect();
-    let file = taskfile::parse(&text, &tz).unwrap().unwrap();
+    let file = taskfile::parse(&text, &tz, r.today()).unwrap().unwrap();
     let applied = taskfile::apply(&mut r, a, &file, since).unwrap();
     assert_eq!(applied.deleted, 2);
     assert_eq!(spans(&r, a), [(ms("2026-11-01T09:00"), Some(ms("2026-11-01T10:00")))]);
@@ -257,4 +257,33 @@ fn only_recent_sessions() {
         text.contains("2026-11-01 09:00:00 -") && !text.contains("Not shown"),
         "{text}"
     );
+}
+
+#[test]
+fn sections_left_out_and_header_like_text() {
+    let (mut r, time) = setup();
+    let tab = r.create_tab("work").unwrap();
+    let a = r.add_task(tab, Place::LastChildOf(None), "a").unwrap();
+    r.start_work(a).unwrap();
+    time.store(ms("2026-11-23T10:00:00"), Ordering::SeqCst);
+    r.stop_work().unwrap();
+    r.set_notes(a, "intro\nnotes:\nwork log:\n@@ 1").unwrap();
+    r.add_note(a, "diff:\n@@ -1,2 +1,3 @@\n\\@@ 2 x\ndescription:").unwrap();
+    // Round trip through the escapes: nothing changes.
+    assert_eq!(edit(&mut r, a, |t| t).unwrap(), Applied::default());
+    // A file with the fields only leaves the rest alone.
+    let applied = edit(&mut r, a, |t| {
+        t.split("\ndescription:")
+            .next()
+            .unwrap()
+            .replace("title: a", "title: b")
+    })
+    .unwrap();
+    assert_eq!(applied.fields, ["title"]);
+    assert_eq!(r.task(a).unwrap().notes, "intro\nnotes:\nwork log:\n@@ 1");
+    assert_eq!(r.notes_for_task(a).unwrap().len(), 1);
+    assert_eq!(r.sessions_for_task(a).unwrap().len(), 1);
+    // A note out of range.
+    let e = edit(&mut r, a, |t| t.replace("\nwork log:", "\n@@ 4\nx\n\nwork log:"));
+    assert!(err(e).contains("there is no note 4"));
 }
