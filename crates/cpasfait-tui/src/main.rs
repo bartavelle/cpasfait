@@ -270,9 +270,7 @@ fn edit_note_list(terminal: &mut DefaultTerminal, app: &mut App, task: cpasfait_
     let changes = notes::changes(&list, &edited)?;
     let deleted = changes.iter().filter(|(_, t)| t.is_empty()).count();
     let changed = changes.len() - deleted;
-    for (id, text) in changes {
-        app.repo.set_note_text(id, &text)?;
-    }
+    app.repo.set_note_texts(&changes)?;
     app.refresh()?;
     app.info(match (changed, deleted) {
         (0, 0) => "no changes".to_owned(),

@@ -521,7 +521,10 @@ impl App {
                     EditResult::Submit => {
                         let cmd = editor.text().to_owned();
                         self.mode = Mode::Normal;
-                        self.history.add(&cmd);
+                        // Not notes: their text belongs in the notes, not in a history file.
+                        if !matches!(cmd.split_whitespace().next(), Some("note" | "worknote")) {
+                            self.history.add(&cmd);
+                        }
                         self.run_command(&cmd)
                     }
                     EditResult::Cancel => {

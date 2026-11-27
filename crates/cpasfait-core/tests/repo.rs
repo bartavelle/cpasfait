@@ -671,6 +671,13 @@ fn notes() {
     r.set_note_text(second, "").unwrap();
     assert_eq!(r.notes_for_task(a).unwrap().len(), 1);
     assert_eq!(r.note_counts(tab).unwrap().get(&a), Some(&1));
+    // Several at once: all or none.
+    let missing = cpasfait_core::NoteId::new();
+    assert!(r.set_note_texts(&[(first, "x".into()), (missing, "y".into())]).is_err());
+    assert_eq!(r.note(first).unwrap().text, "asked Bob by mail");
+    // Not on a deleted task.
+    r.delete_task(a).unwrap();
+    assert!(r.add_note(a, "too late").is_err());
     // The read model is rebuilt identically from the ops.
     let before = r.dump_model().unwrap();
     r.rebuild().unwrap();

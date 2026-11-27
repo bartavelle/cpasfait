@@ -10,7 +10,9 @@
 //! ```
 //!
 //! Blocks are matched back to the notes by their number: a changed text
-//! updates the note, a removed block (or an emptied one) deletes it.
+//! updates the note, a removed block (or an emptied one) deletes it. A file
+//! without any block (emptied) changes nothing. Text lines that would look
+//! like a header get a `\` in front (`\@@ `), removed when reading back.
 
 use anyhow::{Result, bail};
 use cpasfait_core::{Note, NoteId};
@@ -25,10 +27,20 @@ pub fn render(title: &str, notes: &[Note], when: impl Fn(i64) -> String) -> Stri
     );
     for (i, n) in notes.iter().enumerate() {
         out.push_str(&format!("\n{HEADER}{} · {} · {}\n", i + 1, when(n.at), n.author.name));
-        out.push_str(&n.text);
-        out.push('\n');
+        for line in n.text.lines() {
+            if is_escaped_header(line) {
+                out.push('\\');
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
     }
     out
+}
+
+/// `@@ ` with any number of `\` in front.
+fn is_escaped_header(line: &str) -> bool {
+    line.trim_start_matches('\\').starts_with(HEADER)
 }
 
 /// The texts of the blocks, by number (1-based).
@@ -52,7 +64,7 @@ pub fn parse(text: &str) -> Result<HashMap<usize, String>> {
                 .map_err(|_| anyhow::anyhow!("line {}: a note header must start with its number", i + 1))?;
             current = Some((n, String::new()));
         } else if let Some((_, t)) = &mut current {
-            t.push_str(line);
+            t.push_str(if is_escaped_header(line) { &line[1..] } else { line });
             t.push('\n');
         }
     }
@@ -61,9 +73,13 @@ pub fn parse(text: &str) -> Result<HashMap<usize, String>> {
 }
 
 /// What to do with `notes` (as rendered) given the edited file: new texts
-/// (empty: delete).
+/// (empty: delete). Nothing when no block is left (an emptied file, as a
+/// way to cancel).
 pub fn changes(notes: &[Note], edited: &str) -> Result<Vec<(NoteId, String)>> {
     let mut blocks = parse(edited)?;
+    if blocks.is_empty() {
+        return Ok(vec![]);
+    }
     let mut out = vec![];
     for (i, n) in notes.iter().enumerate() {
         match blocks.remove(&(i + 1)) {
@@ -120,5 +136,23 @@ mod tests {
         assert!(changes(&notes, &format!("{text}@@ 1\nagain\n")).is_err());
         assert!(changes(&notes, &format!("{text}@@ 7\nnew\n")).is_err());
         assert!(changes(&notes, &format!("{text}@@ x\n")).is_err());
+
+        // An emptied file (or only the comments) cancels.
+        assert!(changes(&notes, "").unwrap().is_empty());
+        let header: String = text.lines().take(2).map(|l| format!("{l}\n")).collect();
+        assert!(changes(&notes, &header).unwrap().is_empty());
+    }
+
+    #[test]
+    fn text_that_looks_like_a_header() {
+        let notes = vec![note("diff:\n@@ -1,2 +1,3 @@\n\\@@ 2 x", 1)];
+        let text = render("t", &notes, |ms| format!("T{ms}"));
+        assert!(text.contains("\n\\@@ -1,2 +1,3 @@\n\\\\@@ 2 x\n"), "{text}");
+        assert!(changes(&notes, &text).unwrap().is_empty());
+        let edited = text.replace("diff:", "the diff:");
+        assert_eq!(
+            changes(&notes, &edited).unwrap(),
+            vec![(notes[0].id, "the diff:\n@@ -1,2 +1,3 @@\n\\@@ 2 x".into())]
+        );
     }
 }

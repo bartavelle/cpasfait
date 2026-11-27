@@ -1416,6 +1416,9 @@ impl Repo {
             return Err(Error::Invalid("empty note".into()));
         }
         let t = self.task(task)?;
+        if t.deleted {
+            return Err(Error::Invalid("that task is deleted".into()));
+        }
         let id = NoteId::new();
         let now = self.now_ms();
         self.commit(vec![
@@ -1429,15 +1432,22 @@ impl Repo {
 
     /// Change a note's text (empty: delete it).
     pub fn set_note_text(&mut self, id: NoteId, text: &str) -> Result<()> {
-        let n = self.note(id)?;
-        let text = text.trim();
-        if text.is_empty() {
-            return self.delete_note(id);
+        self.set_note_texts(&[(id, text.to_owned())])
+    }
+
+    /// Several [`Repo::set_note_text`] at once: all of them, or none.
+    pub fn set_note_texts(&mut self, changes: &[(NoteId, String)]) -> Result<()> {
+        let mut edits = vec![];
+        for (id, text) in changes {
+            let n = self.note(*id)?;
+            let text = text.trim();
+            if text.is_empty() {
+                edits.push((n.tab, id.0, Change::NoteDeleted(true)));
+            } else if text != n.text {
+                edits.push((n.tab, id.0, Change::NoteText(text.to_owned())));
+            }
         }
-        if text == n.text {
-            return Ok(());
-        }
-        self.edit1(n.tab, id, Change::NoteText(text.to_owned()))
+        self.commit(edits)
     }
 
     pub fn delete_note(&mut self, id: NoteId) -> Result<()> {
