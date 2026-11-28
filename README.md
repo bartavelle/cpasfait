@@ -167,7 +167,12 @@ friend's server) can hold shared tabs; its owner cannot read them.
   server's `authorized_keys`, paths are relative to `/srv/cpasfait`
   (`rsync:cpasfait@box:` for that directory itself, `rsync:cpasfait@box:team`
   for a subdirectory, created if missing). Only one missing level can be
-  created through rrsync. To check such a remote by hand (`ssh` itself is
+  created through rrsync. rrsync allows only one transfer at a time and
+  refuses the others ("Another instance of rrsync is already accessing this
+  directory"): cpasfait retries a few times, but with several members or
+  tabs on one directory, add `-no-lock` (`command="/usr/bin/rrsync -no-lock
+  /srv/cpasfait",restrict …`). That is safe: cpasfait only ever adds new
+  files there, never changes or deletes one. To check such a remote by hand (`ssh` itself is
   refused): `rsync --list-only -e "ssh -o BatchMode=yes" cpasfait@box:./`
 
 ### Sharing through Google Drive

@@ -19,7 +19,10 @@
 //! the remote directory's parent is missing (then `mkdir -p` first), so a key
 //! restricted with rrsync (`command="rrsync /srv/cpasfait",restrict` in
 //! `authorized_keys`) works; the remote path is then relative to that root
-//! (`rsync:host:` for the root itself).
+//! (`rsync:host:` for the root itself). rrsync allows one transfer at a
+//! time per directory and refuses the others at once: they are retried a
+//! few times, and `rrsync -no-lock` avoids the problem altogether (safe,
+//! as remote files are never changed).
 
 use super::RemoteBackend;
 use super::localdir::LocalDir;
@@ -35,6 +38,15 @@ pub const SSH: &str = "ssh -o BatchMode=yes -o ConnectTimeout=20";
 /// A directory listed twice within this delay is not pulled again (a sync
 /// lists `<tab>/keys` then `<tab>/ops`: one pull of `<tab>` serves both).
 const PULL_REUSE: Duration = Duration::from_secs(2);
+
+/// What rrsync says when another transfer holds its lock on the directory
+/// (it does not wait: it gives up at once).
+const RRSYNC_BUSY: &str = "Another instance of rrsync is already accessing this directory";
+
+/// Tries after the first one when rrsync is busy, waiting twice as long
+/// each time from [`BUSY_FIRST_DELAY`] (about 8 s in all).
+const BUSY_RETRIES: u32 = 5;
+const BUSY_FIRST_DELAY: Duration = Duration::from_millis(if cfg!(test) { 5 } else { 250 });
 
 /// Files pushed per rsync run by `put_new_many` (each run is an ssh
 /// connection; batches let progress be shown).
@@ -96,12 +108,46 @@ impl Rsync {
         }
     }
 
+    /// Run rsync; when rrsync refuses because another transfer holds its
+    /// lock, try again a few times (see [`BUSY_RETRIES`]).
     fn rsync(&self, args: &[&str], cwd: Option<&Path>) -> Result<()> {
+        let mut delay = BUSY_FIRST_DELAY;
+        let mut attempt = 0;
+        loop {
+            match self.rsync_once(args, cwd) {
+                Err(Error::Backend(m)) if m.contains(RRSYNC_BUSY) => {
+                    if attempt == BUSY_RETRIES {
+                        return Err(Error::Backend(format!(
+                            "{m} (still busy after {} tries; on the server, rrsync's -no-lock option avoids this: \
+                             cpasfait never changes or deletes remote files, so concurrent transfers are safe)",
+                            attempt + 1
+                        )));
+                    }
+                    attempt += 1;
+                    // Some jitter, so that two clients waiting for each other don't retry in step.
+                    let jitter = BUSY_FIRST_DELAY * u32::from(uuid::Uuid::new_v4().as_bytes()[0]) / 128;
+                    std::thread::sleep(delay + jitter);
+                    delay *= 2;
+                }
+                other => return other,
+            }
+        }
+    }
+
+    fn rsync_once(&self, args: &[&str], cwd: Option<&Path>) -> Result<()> {
         let mut cmd = Command::new("rsync");
-        cmd.args(["-r", "--ignore-existing", "--timeout=60", "-e", &self.ssh])
-            .args(args)
-            .env("LC_ALL", "C")
-            .stdin(std::process::Stdio::null());
+        // Dot files: rsync's temporary files of a concurrent upload.
+        cmd.args([
+            "-r",
+            "--ignore-existing",
+            "--exclude=.*",
+            "--timeout=60",
+            "-e",
+            &self.ssh,
+        ])
+        .args(args)
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null());
         if let Some(d) = cwd {
             cmd.current_dir(d);
         }
@@ -286,6 +332,54 @@ mod tests {
         let b = Rsync::new("box:x", m.path());
         assert_eq!(b.split_remote(), Some(("box", "x")));
         assert_eq!(Rsync::new("/srv/a:b", m.path()).split_remote(), None);
+    }
+
+    /// A remote shell that answers like a busy rrsync the first `busy`
+    /// times, then runs the command locally (the "host" is ignored).
+    fn fake_ssh(dir: &Path, busy: u32) -> String {
+        let script = dir.join("ssh");
+        let count = dir.join("count");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nn=$(cat '{c}' 2>/dev/null || echo 0)\necho $((n+1)) > '{c}'\n\
+                 if [ \"$n\" -lt {busy} ]; then\n  echo '/usr/bin/rrsync error: {RRSYNC_BUSY}.' >&2\n  exit 1\nfi\n\
+                 shift\nexec \"$@\"\n",
+                c = count.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script.display().to_string()
+    }
+
+    #[test]
+    fn busy_rrsync_is_retried() {
+        if !have_rsync() {
+            eprintln!("rsync not installed: skipped");
+            return;
+        }
+        let (remote, mirror, bin) = (
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+            tempfile::tempdir().unwrap(),
+        );
+        let target = format!("fakehost:{}", remote.path().join("root").display());
+        std::fs::create_dir_all(remote.path().join("root")).unwrap();
+        let b = Rsync::new(&target, mirror.path()).with_ssh(&fake_ssh(bin.path(), 2));
+        b.put_new("t/ops/d/1.seg", b"hello").unwrap();
+        assert_eq!(
+            std::fs::read(remote.path().join("root/t/ops/d/1.seg")).unwrap(),
+            b"hello"
+        );
+        assert_eq!(std::fs::read_to_string(bin.path().join("count")).unwrap().trim(), "3");
+
+        // Busy for too long: an error that says what to do.
+        let (mirror, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let b = Rsync::new(&target, mirror.path()).with_ssh(&fake_ssh(bin.path(), 100));
+        let e = b.list("t/ops").unwrap_err().to_string();
+        assert!(e.contains("-no-lock"), "{e}");
     }
 
     #[test]
